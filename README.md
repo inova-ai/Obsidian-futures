@@ -16,3 +16,12 @@ Realized PnL increases Futures wallet balance only after the position is actuall
 
 ## Deploy
 Replace the previous package with this ZIP. Keep the existing Binance credentials and trading-mode environment variables.
+
+## Signal consistency patch (v5.34)
+- Current signal panels now use one canonical `finalSignal()` decision path.
+- Main signal, live entry signal, entry guard, and Signal Drop are synchronized to the same current-candle model.
+- MTF rows remain contextual and are not treated as separate final signals.
+- Future candle projection remains explicitly separate from the current final signal.
+- This patch fixes UI/model disagreement; it does not guarantee trading profitability.
+
+Precision patch: all Binance Futures order quantities, LIMIT prices, SL/TP trigger prices, and emergency close quantities are serialized using exchange LOT_SIZE/PRICE_FILTER precision to prevent floating-point precision errors.
