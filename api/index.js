@@ -14,7 +14,7 @@ app.use((req,res,next)=>{res.setHeader('X-Content-Type-Options','nosniff');res.s
 app.use(express.json({limit:'1mb'})); 
 const rate=new Map();
 function rateLimit(req,res,next){const key=(req.ip||'unknown')+'|'+req.path,now=Date.now();let x=rate.get(key);if(!x||now-x.t>60000)x={t:now,n:0};x.n++;rate.set(key,x);if(x.n>120)return res.status(429).json({error:'Rate limit exceeded'});next()}
-app.get('/api',(req,res)=>res.json({ok:true,service:'obsidian-futures',version:'5.21.0-real-order-sizing'}));
+app.get('/api',(req,res)=>res.json({ok:true,service:'obsidian-futures',version:'5.23.0-full-reconcile'}));
 app.use('/api',rateLimit);
 
 const TRADING_MODE=String(process.env.TRADING_MODE|| (process.env.ENABLE_LIVE_TRADING==='true'?'live':'demo')).trim().toLowerCase();
@@ -100,6 +100,8 @@ function filterOrderQty(rawQty,lot){
   if(qty>maxQty)throw Error(`Quantity ${qty} melebihi maksimum Binance ${maxQty}`);
   return qty;
 }
+async function cancelSymbolAlgoOrders(s){try{return await binance('/fapi/v1/algoOpenOrders',{symbol:s},'DELETE',true)}catch(e){return {error:e.message}}}
+async function cancelSymbolRegularOrders(s){try{return await binance('/fapi/v1/allOpenOrders',{symbol:s},'DELETE',true)}catch(e){return {error:e.message}}}
 function decodeBase32(input){const a='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';let bits='',out=[];for(const ch of String(input).replace(/=+$/,'').toUpperCase().replace(/\s/g,'')){const i=a.indexOf(ch);if(i<0)throw Error('Invalid TOTP secret');bits+=i.toString(2).padStart(5,'0');while(bits.length>=8){out.push(parseInt(bits.slice(0,8),2));bits=bits.slice(8)}}return Buffer.from(out)}
 function totp(secret,time=Math.floor(Date.now()/1000),step=30,digits=6){const key=decodeBase32(secret),b=Buffer.alloc(8);b.writeBigUInt64BE(BigInt(Math.floor(time/step)));const h=crypto.createHmac('sha1',key).update(b).digest(),o=h[h.length-1]&15;return String((h.readUInt32BE(o)&0x7fffffff)%10**digits).padStart(digits,'0')}
 function base32(buf){let bits='',out='';for(const b of buf)bits+=b.toString(2).padStart(8,'0');for(let i=0;i<bits.length;i+=5)out+='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'[parseInt(bits.slice(i,i+5).padEnd(5,'0'),2)];return out}
@@ -126,7 +128,7 @@ app.get('/api/runtime',(_,r)=>r.json({
   bybitBase:BYBIT_BASE
 }));
 
-app.get('/api/health',async(_,r)=>{try{let db='not-configured';if(pool){await ensureDb();db='postgres'}r.json({ok:true,version:'5.21.0-real-order-sizing',live:LIVE,tradingMode:TRADING_MODE,binanceEnvironment:IS_DEMO?'demo':'live',binanceBase:BASE,binanceWs:WS_BASE,marketBase:MARKET_BASE,marketWs:MARKET_WS_BASE,binanceCredentialsConfigured:!!(ENV_BINANCE_API_KEY&&ENV_BINANCE_API_SECRET),killSwitch:await getKillSwitch(),maxLeverage:MAXLEV,maxRiskPct:MAXRISK,dailyDrawdownPct:MAX_DD,db,auth:pool?'postgres':(ENV_ADMIN_USER&&ENV_ADMIN_PASSWORD?'env-admin':'unconfigured')})}catch(e){r.status(503).json({ok:false,db:'down',auth:ENV_ADMIN_USER&&ENV_ADMIN_PASSWORD?'env-admin':'unconfigured',error:e.message})}});
+app.get('/api/health',async(_,r)=>{try{let db='not-configured';if(pool){await ensureDb();db='postgres'}r.json({ok:true,version:'5.23.0-full-reconcile',live:LIVE,tradingMode:TRADING_MODE,binanceEnvironment:IS_DEMO?'demo':'live',binanceBase:BASE,binanceWs:WS_BASE,marketBase:MARKET_BASE,marketWs:MARKET_WS_BASE,binanceCredentialsConfigured:!!(ENV_BINANCE_API_KEY&&ENV_BINANCE_API_SECRET),killSwitch:await getKillSwitch(),maxLeverage:MAXLEV,maxRiskPct:MAXRISK,dailyDrawdownPct:MAX_DD,db,auth:pool?'postgres':(ENV_ADMIN_USER&&ENV_ADMIN_PASSWORD?'env-admin':'unconfigured')})}catch(e){r.status(503).json({ok:false,db:'down',auth:ENV_ADMIN_USER&&ENV_ADMIN_PASSWORD?'env-admin':'unconfigured',error:e.message})}});
 app.get('/api/auth/status',async(qr,r)=>{try{if(pool){try{await ensureDb();const u=(await q('SELECT username FROM users WHERE id=1'))[0];return r.json({configured:!!u,authenticated:!!optionalAuth(qr),username:u?.username||null,mode:'postgres'})}catch(e){if(!ENV_ADMIN_USER||!ENV_ADMIN_PASSWORD)throw e}}if(!ENV_ADMIN_USER||!ENV_ADMIN_PASSWORD)throw Error('Authentication is not configured. Set ADMIN_USERNAME, ADMIN_PASSWORD and MASTER_KEY in Vercel.');r.json({configured:true,authenticated:!!optionalAuth(qr),username:ENV_ADMIN_USER,mode:'env'})}catch(e){r.status(503).json({error:e.message,code:'AUTH_NOT_CONFIGURED'})}});
 app.post('/api/auth/setup',async(qr,r)=>{try{if(!pool)throw Error('Database belum dikonfigurasi. Untuk mode Vercel tanpa database, isi ADMIN_USERNAME, ADMIN_PASSWORD dan MASTER_KEY lalu gunakan Login.');await ensureDb();if((await q('SELECT id FROM users WHERE id=1')).length)throw Error('User already configured');const username=String(qr.body.username||'admin').trim(),password=String(qr.body.password||'');if(!username||password.length<12)throw Error('Username required and password must be at least 12 characters');const ph=passwordHash(password);await exec('INSERT INTO users(id,username,salt,password_hash,created_at) VALUES(1,$1,$2,$3,$4)',[username,ph.salt,ph.hash,Date.now()]);await audit('AUTH_SETUP',username);const token=makeToken(username);r.json({token,username,expiresInSec:SESSION_TTL/1000,mode:'postgres'})}catch(e){r.status(400).json({error:e.message})}});
 app.post('/api/auth/login',async(qr,r)=>{try{const suppliedUser=String(qr.body.username||'').trim(),suppliedPass=String(qr.body.password||'');let username='';if(pool){try{await ensureDb();const u=(await q('SELECT * FROM users WHERE id=1'))[0];if(u){const got=crypto.scryptSync(suppliedPass,u.salt,64,{N:16384,r:8,p:1});if(!crypto.timingSafeEqual(got,Buffer.from(u.password_hash,'hex')))throw Error('Invalid credentials');username=u.username;const row=(await q('SELECT totp_enc FROM credentials WHERE id=1'))[0];if(row?.totp_enc&&String(qr.body.code||'').trim()!==totp(dec(row.totp_enc)))throw Error('Valid 2FA code required')}}catch(e){if(!ENV_ADMIN_USER||!ENV_ADMIN_PASSWORD||e.message==='Invalid credentials'||e.message==='Valid 2FA code required')throw e}}if(!username){if(!ENV_ADMIN_USER||!ENV_ADMIN_PASSWORD)throw Error('Run setup first or configure ADMIN_USERNAME and ADMIN_PASSWORD in Vercel');if(suppliedUser!==ENV_ADMIN_USER||suppliedPass!==ENV_ADMIN_PASSWORD)throw Error('Invalid credentials');username=ENV_ADMIN_USER}const token=makeToken(username);if(pool)await audit('AUTH_LOGIN',username);r.json({token,username,expiresInSec:SESSION_TTL/1000,mode:pool?'postgres':'env'})}catch(e){r.status(401).json({error:e.message})}});
@@ -199,45 +201,39 @@ app.post('/api/2fa/verify',auth,requireMaster,async(qr,r)=>{try{const row=(await
 app.post('/api/paper/order',auth,async(qr,r)=>{try{if(await getKillSwitch())throw Error('Kill switch active');const b=qr.body,rc=riskCalc(b),id=crypto.randomUUID(),now=Date.now(),p={id,symbol:sym(b.symbol),side:b.side,entry:+b.entry,quantity:rc.quantity,sl:+b.stopLoss,tp:+b.takeProfit,openedAt:now,status:'OPEN',pnl:0};await exec(`INSERT INTO trades(id,symbol,side,entry,qty,opened_at,reason,setup,status,meta) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'OPEN',$9)`,[id,p.symbol,p.side,p.entry,p.quantity,now,b.reason||'manual',b.setup||'structure+ATR',b]);await audit('PAPER_ORDER',id,qr.user);r.json({mode:'PAPER',position:p,risk:rc})}catch(e){r.status(400).json({error:e.message})}});
 app.post('/api/paper/close',auth,async(qr,r)=>{try{const s=sym(qr.body.symbol),row=(await q("SELECT * FROM trades WHERE symbol=$1 AND status='OPEN' ORDER BY opened_at DESC LIMIT 1",[s]))[0];if(!row)throw Error('Tidak ada posisi PAPER yang terbuka.');const price=Number((await publicBinance('/fapi/v1/ticker/price',{symbol:s})).price||0),pnl=(row.side==='LONG'?1:-1)*(price-Number(row.entry))*Number(row.qty);await exec("UPDATE trades SET exit=$1,pnl=$2,closed_at=$3,status='CLOSED',reason=$4 WHERE id=$5",[price,pnl,Date.now(),'manual-close',row.id]);await audit('PAPER_CLOSE',row.id,qr.user);r.json({ok:true,mode:'PAPER',exitPrice:price,pnl,realizedPnl:pnl})}catch(e){r.status(400).json({error:e.message})}});
 app.post('/api/live/close',auth,async(qr,r)=>{try{
-  const s=sym(qr.body.symbol);
-  await loadCredentials();
+  const s=sym(qr.body.symbol); await loadCredentials();
   if(!KEY||!SECRET)throw Error('Binance API credential belum dikonfigurasi.');
   const beforeBal=(await binance('/fapi/v3/balance',{},'GET',true)).find(x=>x.asset==='USDT')||{};
-  const balanceBefore=Number(beforeBal.balance||0), availableBefore=Number(beforeBal.availableBalance||0);
+  const balanceBefore=Number(beforeBal.balance||0),availableBefore=Number(beforeBal.availableBalance||0);
   const ps=await binance('/fapi/v3/positionRisk',{symbol:s},'GET',true);
   const p=Array.isArray(ps)?ps.find(x=>Math.abs(Number(x.positionAmt||0))>0):ps;
-  const amt=Number(p?.positionAmt||0);
-  if(!amt)throw Error('Tidak ada posisi Binance yang terbuka.');
-  const side=amt>0?'SELL':'BUY',qty=Math.abs(amt),info=await binance('/fapi/v1/exchangeInfo',{},'GET',true),meta=info.symbols.find(x=>x.symbol===s),lot=meta?.filters?.find(x=>x.filterType==='LOT_SIZE'),step=+(lot?.stepSize||'0.001'),round=(v,st)=>Math.floor(v/st+1e-10)*st,q=round(qty,step);
-  if(q<=0)throw Error('Quantity posisi tidak valid.');
-  const since=Date.now()-10000;
+  const amt=Number(p?.positionAmt||0); if(!amt)throw Error('Tidak ada posisi Binance yang terbuka.');
+  const side=amt>0?'SELL':'BUY',qty=Math.abs(amt);
+  const info=await binance('/fapi/v1/exchangeInfo',{},'GET',true),meta=info.symbols.find(x=>x.symbol===s),lot=meta?.filters?.find(x=>x.filterType==='LOT_SIZE');
+  const step=+(lot?.stepSize||'0.001'),q=decimalFloor(qty,step); if(q<=0)throw Error('Quantity posisi tidak valid.');
+  const closeStarted=Date.now()-2000;
+  const [algoCancel,regularCancel]=await Promise.all([cancelSymbolAlgoOrders(s),cancelSymbolRegularOrders(s)]);
   const out=await binance('/fapi/v1/order',{symbol:s,side,type:'MARKET',quantity:q,reduceOnly:'true',newOrderRespType:'RESULT'},'POST',true);
-  try{await binance('/fapi/v1/allOpenOrders',{symbol:s},'DELETE',true)}catch{}
-
-  // Wait until Binance reports the position as flat, then read the actual realized PNL and wallet balance.
-  let finalPos=null, afterBal=null, income=[];
-  for(let i=0;i<12;i++){
+  let finalPos=null,afterBal=null,income=[];
+  for(let i=0;i<16;i++){
     await new Promise(resolve=>setTimeout(resolve,250));
     const [pp,bb,ii]=await Promise.all([
       binance('/fapi/v3/positionRisk',{symbol:s},'GET',true),
       binance('/fapi/v3/balance',{},'GET',true),
-      binance('/fapi/v1/income',{incomeType:'REALIZED_PNL',symbol:s,startTime:since,limit:20},'GET',true).catch(()=>[])
+      binance('/fapi/v1/income',{incomeType:'REALIZED_PNL',symbol:s,startTime:closeStarted,limit:50},'GET',true).catch(()=>[])
     ]);
     finalPos=(Array.isArray(pp)?pp.find(x=>Math.abs(Number(x.positionAmt||0))>0):null)||null;
-    afterBal=(Array.isArray(bb)?bb:[]).find(x=>x.asset==='USDT')||{};
-    income=Array.isArray(ii)?ii:[];
+    afterBal=(Array.isArray(bb)?bb:[]).find(x=>x.asset==='USDT')||{}; income=Array.isArray(ii)?ii:[];
     if(!finalPos)break;
   }
   if(finalPos)throw Error(`Binance belum melaporkan posisi ${s} = 0 setelah close. Posisi aktual masih ${finalPos.positionAmt}.`);
-  const realizedRows=income.filter(x=>x.symbol===s).sort((a,b)=>Number(b.time||0)-Number(a.time||0));
+  const realizedRows=income.filter(x=>x.symbol===s&&Number(x.time||0)>=closeStarted).sort((a,b)=>Number(a.time||0)-Number(b.time||0));
   const realizedPnl=realizedRows.reduce((sum,x)=>sum+Number(x.income||0),0);
-  const balanceAfter=Number(afterBal?.balance||0),availableAfter=Number(afterBal?.availableBalance||0);
-  const walletDelta=balanceAfter-balanceBefore;
-  const entryPrice=Number(p.entryPrice||0),exitPrice=Number(out.avgPrice||p.markPrice||0);
-  const grossEstimate=(amt>0?1:-1)*(exitPrice-entryPrice)*q;
-  await audit('EXCHANGE_CLOSE',JSON.stringify({environment:IS_DEMO?'demo':'live',symbol:s,side,orderId:out.orderId,qty:q,realizedPnl,walletDelta,balanceBefore,balanceAfter}),qr.user);
-  r.json({ok:true,mode:TRADING_MODE,exitPrice,entryPrice,quantity:q,grossEstimate,realizedPnl,walletDelta,balanceBefore,balanceAfter,availableBefore,availableAfter,positionClosed:true,order:out,realizedIncome:realizedRows});
-}catch(e){r.status(400).json({error:e.message})}});
+  const balanceAfter=Number(afterBal?.balance||0),availableAfter=Number(afterBal?.availableBalance||0),walletDelta=balanceAfter-balanceBefore;
+  const entryPrice=Number(p.entryPrice||0),exitPrice=Number(out.avgPrice||p.markPrice||0),grossEstimate=(amt>0?1:-1)*(exitPrice-entryPrice)*q;
+  await audit('EXCHANGE_CLOSE',JSON.stringify({environment:IS_DEMO?'demo':'live',symbol:s,side,orderId:out.orderId,qty:q,realizedPnl,walletDelta,balanceBefore,balanceAfter,algoCancel,regularCancel}),qr.user);
+  r.json({ok:true,mode:TRADING_MODE,exitPrice,entryPrice,quantity:q,grossEstimate,realizedPnl,walletDelta,balanceBefore,balanceAfter,availableBefore,availableAfter,positionClosed:true,order:out,realizedIncome:realizedRows,canceled:{algo:algoCancel,regular:regularCancel}});
+}catch(e){r.status(400).json({error:e.message,code:e.code||'CLOSE_ERROR'})}});
 app.post('/api/live/order',auth,async(qr,r)=>{try{
   if(TRADING_MODE==='paper'||(TRADING_MODE==='live'&&!LIVE))throw Error('Exchange trading is disabled. Set TRADING_MODE=demo for Binance Demo or TRADING_MODE=live with ENABLE_LIVE_TRADING=true.');
   if(await getKillSwitch())throw Error('Kill switch active');
@@ -265,6 +261,10 @@ app.post('/api/live/order',auth,async(qr,r)=>{try{
   const minNotional=Number(notional?.minNotional||notional?.notional||0);
   if(minNotional&&finalNotional<minNotional)throw Error(`Nilai posisi ${finalNotional.toFixed(2)} USDT di bawah minimum notional Binance ${minNotional} USDT`);
   const requestedQty=Number(b.expectedQuantity||0),requestedNotional=Number(b.expectedNotional||0);
+  const qtyTolerance=Math.max(Number(lot?.stepSize||0.001),Math.abs(qty)*0.00001);
+  if(requestedQty>0 && Math.abs(requestedQty-qty)>qtyTolerance){
+    throw Object.assign(new Error(`Qty kalkulator (${requestedQty.toFixed(6)} BTC) berbeda dari Qty server (${qty.toFixed(6)} BTC). Sinkronkan ulang kalkulator sebelum entry.`),{code:'SIZING_MISMATCH'});
+  }
   const sizingCheck={requestedQty,requestedNotional,serverEntry:effectiveEntry,serverQty:rc.quantity,serverNotional:rc.notional,finalQty:qty,finalNotional,margin,leverage:rc.leverage,capital:rc.capital,sizingMode:rc.sizingMode,stepSize:Number(lot?.stepSize||0.001),minQty:Number(lot?.minQty||0),maxQty:Number(lot?.maxQty||0)};
   const clientOrderId=`OBS-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
   const entryPayload={symbol:s,side,quantity:qty,newClientOrderId:clientOrderId,newOrderRespType:'RESULT',type:entryType};
@@ -276,22 +276,38 @@ app.post('/api/live/order',auth,async(qr,r)=>{try{
   const exit=side==='BUY'?'SELL':'BUY';
   const sl=await binance('/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol:s,side:exit,type:'STOP_MARKET',triggerPrice:stop,closePosition:'true',workingType:'MARK_PRICE'},'POST',true);
   const tp=take>0?await binance('/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol:s,side:exit,type:'TAKE_PROFIT_MARKET',triggerPrice:take,closePosition:'true',workingType:'MARK_PRICE'},'POST',true):null;
-  let actualPosition=null;
-  for(let i=0;i<4&&!actualPosition;i++){
+  let actualPosition=null, actualOrder=null;
+  for(let i=0;i<12;i++){
     try{
-      const ps=await binance('/fapi/v3/positionRisk',{symbol:s},'GET',true);
+      const [ps,ord]=await Promise.all([
+        binance('/fapi/v3/positionRisk',{symbol:s},'GET',true),
+        entry.orderId?binance('/fapi/v1/order',{symbol:s,orderId:entry.orderId},'GET',true):Promise.resolve(null)
+      ]);
       actualPosition=(Array.isArray(ps)?ps:[]).find(x=>Math.abs(Number(x.positionAmt||0))>0)||null;
+      actualOrder=ord||entry;
+      if(actualPosition || ['FILLED','PARTIALLY_FILLED','CANCELED','REJECTED','EXPIRED'].includes(String(actualOrder.status||'').toUpperCase()))break;
     }catch{}
-    if(!actualPosition&&i<3)await new Promise(resolve=>setTimeout(resolve,250));
+    await new Promise(resolve=>setTimeout(resolve,250));
   }
-  const actualQty=actualPosition?Math.abs(Number(actualPosition.positionAmt)):Number(entry.executedQty||qty);
-  const actualEntry=actualPosition?Number(actualPosition.entryPrice):Number(entry.avgPrice||roundedEntry);
+  const executedQty=Number(actualOrder?.executedQty||entry.executedQty||0);
+  const actualQty=actualPosition?Math.abs(Number(actualPosition.positionAmt)):executedQty;
+  const actualEntry=actualPosition?Number(actualPosition.entryPrice):Number(actualOrder?.avgPrice||entry.avgPrice||roundedEntry);
   const actualNotional=actualQty*actualEntry;
   const qtyDelta=actualQty-qty;
-  const qtyMatch=Math.abs(qtyDelta)<=Math.max(Number(lot?.stepSize||0.001),qty*0.00001);
+  const actualQtyTolerance=Math.max(Number(lot?.stepSize||0.001),Math.abs(qty)*0.00001);
+  const qtyMatch=actualQty>0 && Math.abs(qtyDelta)<=actualQtyTolerance;
+  if(!qtyMatch){
+    // Never leave an unintended position open if the exchange reports a different size.
+    try{await cancelSymbolAlgoOrders(s)}catch{}
+    try{await cancelSymbolRegularOrders(s)}catch{}
+    if(actualQty>0){
+      try{await binance('/fapi/v1/order',{symbol:s,side:side==='BUY'?'SELL':'BUY',type:'MARKET',quantity:filterOrderQty(actualQty,lot),reduceOnly:'true',newOrderRespType:'RESULT'},'POST',true)}catch{}
+    }
+    throw Object.assign(new Error(`Qty Binance tidak cocok. Diminta ${qty.toFixed(6)} BTC, aktual ${actualQty.toFixed(6)} BTC. Posisi yang berbeda otomatis dibatalkan/ditutup agar tidak ada risiko sizing tak sengaja.`),{code:'ACTUAL_QTY_MISMATCH'});
+  }
   await audit('EXCHANGE_ORDER',JSON.stringify({environment:IS_DEMO?'demo':'live',symbol:s,side,orderId:entry.orderId,profitMode:take>0?'TARGET':'UNLIMITED',requestedQty,finalQty:qty,actualQty,actualNotional,qtyMatch}),qr.user);
-  r.json({mode:TRADING_MODE,environment:IS_DEMO?'demo':'live',entry,sl,tp,profitMode:take>0?'TARGET':'UNLIMITED',sizing:sizingCheck,actualPosition:actualPosition?{side:Number(actualPosition.positionAmt)>0?'LONG':'SHORT',positionSide:actualPosition.positionSide,quantity:actualQty,entryPrice:actualEntry,notional:actualNotional,leverage:Number(actualPosition.leverage||rc.leverage)}:{quantity:actualQty,entryPrice:actualEntry,notional:actualNotional},qtyMatch,updatedAt:Date.now()});
-}catch(e){r.status(e.code==='POSITION_ALREADY_OPEN'?409:400).json({error:e.message,code:e.code||'ORDER_ERROR',actualPosition:e.actualPosition||null})}});
+  r.json({mode:TRADING_MODE,environment:IS_DEMO?'demo':'live',entry,sl,tp,profitMode:take>0?'TARGET':'UNLIMITED',sizing:sizingCheck,actualPosition:{side:Number(actualPosition?.positionAmt||0)>0?'LONG':'SHORT',positionSide:actualPosition?.positionSide||'BOTH',quantity:actualQty,entryPrice:actualEntry,notional:actualNotional,leverage:Number(actualPosition?.leverage||rc.leverage)},qtyMatch:true,updatedAt:Date.now()});
+}catch(e){r.status(e.code==='POSITION_ALREADY_OPEN'||e.code==='SIZING_MISMATCH'?409:400).json({error:e.message,code:e.code||'ORDER_ERROR',actualPosition:e.actualPosition||null})}});
 
 app.use('/api',(err,req,res,next)=>{console.error(err);if(res.headersSent)return next(err);res.status(500).json({error:'Internal server error'});});
 
