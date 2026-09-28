@@ -1,0 +1,16 @@
+{
+  "name": "obsidian-futures-v5-vercel",
+  "version": "5.6.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "check": "node --check api/index.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "pg": "^8.16.3"
+  }
+}
