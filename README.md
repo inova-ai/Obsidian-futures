@@ -1,4 +1,12 @@
-## v5.23 — Full Sizing + Position + Realized Balance Reconcile
+## v5.25.0 patch audit
+- Fixed LIMIT Entry conversion: UI accepts IDR while Binance/backend receives USDT.
+- Added Cross/Isolated margin synchronization before leverage/order.
+- Added emergency rollback when SL/TP protection cannot be installed after an entry order.
+- Protected journal and audit read endpoints with authentication.
+- Synchronized app/service-worker/package/API version to 5.25.0 to prevent stale cached frontend code.
+- JavaScript syntax checks pass for `app.js` and `api/index.js`.
+
+## v5.25 — Analysis/Execution Separation + Sizing + Position + Realized Balance Reconcile
 - Close endpoint waits for Binance position to reach 0, then reads realized PNL and wallet balance.
 - UI shows realized PNL, post-close balance, and wallet delta after close.
 - Account refresh continues to use Binance as the source of truth.
@@ -67,3 +75,18 @@ Import the ZIP/project into Vercel. No custom build command is required. Node.js
 - Live candle direction, AI entry direction, candle-close countdown, and Jakarta clock are shown continuously.
 - Chart zoom has dedicated + / − / reset controls and mouse-wheel zoom.
 - `/api/market/ticker` provides a no-cache Binance REST fallback for the current candle/mark/index/funding data.
+
+
+## v5.25 — Analysis/Execution Separation
+- Indicator buttons (EMA, BB, MACD, VWAP, ADX, ATR) are analysis-only.
+- Trendline and Fibonacci are chart-analysis tools only.
+- Auto S/R and Swings are analysis-only.
+- Indicator/tool clicks do not call the order function. Manual execution remains on LONG/SHORT buttons.
+- UI explicitly labels the separation between analysis and execution.
+
+
+## Signal Drop v5.28
+- Realtime projection sequence up to 12 candles.
+- Time format follows WIB and uses dot separator (HH.MM WIB).
+- Projection score combines candle body/wicks, momentum, EMA bias, support/resistance proximity, and a decaying horizon weight.
+- Projection is a directional bias, not a guarantee of future price.
