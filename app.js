@@ -44,7 +44,7 @@ function chartStatus(message,show=true){const el=$('chartStatus');if(!el)return;
 function safeDraw(){try{if(!cv.clientWidth||!cv.clientHeight)return;draw();if(S.c.length)chartStatus('',false)}catch(e){const el=$('conn');if(el){el.textContent='CHART ERROR';el.title=e?.stack||e?.message||String(e)}chartStatus('Chart error: '+(e?.message||String(e)))}}
 function draw(){
   if(!cv||!ctx)return;
-  const r=priceMap(); const {w,h,a,dx,py,start}=r;
+  const r=priceMap(); const {w,h,a,dx,py,start,hi,lo}=r;
   ctx.clearRect(0,0,w,h);
   ctx.fillStyle='#070b11'; ctx.fillRect(0,0,w,h);
   if(!a.length){ctx.fillStyle='#718096';ctx.font='12px system-ui';ctx.fillText('Menunggu data market…',16,24);return;}
