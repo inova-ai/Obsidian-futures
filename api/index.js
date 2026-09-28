@@ -8,7 +8,7 @@ const { Pool } = pg;
 
 const app=express(); app.disable('x-powered-by');
 const ROOT=path.dirname(fileURLToPath(import.meta.url));
-const INDEX_HTML=path.join(ROOT,'..','public','index.html');
+const INDEX_HTML=path.join(ROOT,'..','index.html');
 app.get('/',(req,res)=>{res.setHeader('Content-Type','text/html; charset=utf-8');res.setHeader('Cache-Control','public, max-age=0, must-revalidate');res.send(fs.readFileSync(INDEX_HTML,'utf8'))});
 app.use((req,res,next)=>{res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=()');next()});
 app.use(express.json({limit:'1mb'})); 
