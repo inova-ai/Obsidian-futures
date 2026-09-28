@@ -14,11 +14,13 @@ let ws=null,oiTimer=null,pollTimer=null,accountTimer=null,livePollTimer=null,clo
 let PINCH=null;
 let drawRAF=0;
 let ENTRY_GUARD=true;
+let MANUAL_ENTRY_STOP=false;
+let deferredInstallPrompt=null;
 let lastLivePriceTs=0;
 function scheduleDraw(){if(drawRAF)return;drawRAF=requestAnimationFrame(()=>{drawRAF=0;safeDraw()})}
 function currentLiveSide(){const c=S.c.at(-1); if(!c)return 'WAIT'; const pred=AI_TREND?.side||'WAIT'; const candle=c.c>c.o?'BUY':c.c<c.o?'SELL':'WAIT'; if(pred!=='WAIT')return pred; return candle;}
-function entryGuard(side){if(!ENTRY_GUARD)return {ok:true}; const live=currentLiveSide(); if(live!==side)return {ok:false,live,reason:live==='WAIT'?'Arah belum jelas (WAIT).':'Arah live berubah berlawanan.'}; return {ok:true,live};}
-function updateEntryButtons(){const live=currentLiveSide(); const lb=$('long'),sb=$('short'),ql=$('quickLong'),qs=$('quickShort'); [lb,ql].forEach(b=>{if(b){b.disabled=ENTRY_GUARD && live!=='BUY';b.title=b.disabled?`Entry BELI dihentikan: sinyal live ${live}.`:''}}); [sb,qs].forEach(b=>{if(b){b.disabled=ENTRY_GUARD && live!=='SELL';b.title=b.disabled?`Entry JUAL dihentikan: sinyal live ${live}.`:''}}); const st=$('entryGuardStatus'); if(st)st.textContent=ENTRY_GUARD?`Perlindungan entry: AKTIF · Arah live ${live}`:'Perlindungan entry: MATI'; if(st)st.className='note '+(live==='BUY'?'good':live==='SELL'?'bad':'wait');}
+function entryGuard(side){if(MANUAL_ENTRY_STOP)return {ok:false,live:currentLiveSide(),reason:'STOP ENTRY aktif secara manual.'}; if(!ENTRY_GUARD)return {ok:true}; const live=currentLiveSide(); if(live!==side)return {ok:false,live,reason:live==='WAIT'?'Arah belum jelas (WAIT).':'Arah live berubah berlawanan.'}; return {ok:true,live};}
+function updateEntryButtons(){const live=currentLiveSide(); const stopped=MANUAL_ENTRY_STOP; const lb=$('long'),sb=$('short'),ql=$('quickLong'),qs=$('quickShort'); [lb,ql,sb,qs].forEach(b=>{if(b){b.disabled=stopped || (ENTRY_GUARD && ((b===lb||b===ql)?live!=='BUY':live!=='SELL'));b.classList.toggle('entryStopped',b.disabled);b.title=b.disabled?(stopped?'STOP ENTRY aktif.':`Entry dihentikan: sinyal live ${live}.`):''}}); const st=$('entryGuardStatus'); if(st)st.textContent=stopped?'STOP ENTRY AKTIF · order baru dihentikan':(ENTRY_GUARD?`Perlindungan entry: AKTIF · Arah live ${live}`:'Perlindungan entry: MATI'); if(st)st.className='note '+(live==='BUY'?'good':live==='SELL'?'bad':'wait');}
 
 
 let MARKET_WS_BASE='wss://fstream.binance.com';
@@ -55,6 +57,13 @@ function draw(){
     ctx.strokeStyle=up?'#19d39b':'#ff5b7c';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,yh);ctx.lineTo(x,yl);ctx.stroke();
     ctx.fillStyle=up?'#19d39b':'#ff5b7c';const top=Math.min(yo,yc),bh=Math.max(1,Math.abs(yc-yo));ctx.fillRect(x-bw/2,top,bw,bh);
   });
+  // Swing High / Swing Low markers (H/L)
+  const visibleHighs=(S.swings?.hi||[]).filter(i=>i>=start&&i<start+a.length);
+  const visibleLows=(S.swings?.lo||[]).filter(i=>i>=start&&i<start+a.length);
+  ctx.textAlign='center';ctx.font='bold 10px system-ui';
+  visibleHighs.forEach(i=>{const c=S.c[i],x=45+(i-start)*dx,y=Math.max(12,py(c.h)-10);ctx.fillStyle='#ffb35c';ctx.fillText('H',x,y);});
+  visibleLows.forEach(i=>{const c=S.c[i],x=45+(i-start)*dx,y=Math.min(h-38,py(c.l)+18);ctx.fillStyle='#6ee7c8';ctx.fillText('L',x,y);});
+  ctx.textAlign='start';
   const closes=a.map(x=>x.c);
   if(S.ema){const e=EMA(closes,20);line(a,e.slice(start),py,dx,'#d9b56c');}
   if(S.bb){const mid=SMA(closes,20),sd=closes.map((_,i)=>{const z=closes.slice(Math.max(0,i-19),i+1),m=mid[i];return Math.sqrt(z.reduce((q,v)=>q+(v-m)**2,0)/z.length)});line(a,mid.slice(start).map((v,i)=>v+2*sd[start+i]),py,dx,'#60758e');line(a,mid.slice(start).map((v,i)=>v-2*sd[start+i]),py,dx,'#60758e');}
@@ -210,27 +219,42 @@ async function order(side){
   const guard=entryGuard(side);
   if(!guard.ok){updateEntryButtons();return alert(`ENTRY DIHENTIKAN
 
-Arah live sekarang: ${guard.live}
 ${guard.reason}
-
-Sistem tidak akan mengirim order sampai arah kembali sejalan.`)}
+Arah live: ${guard.live}`)}
   const p=S.c.at(-1)?.c,z=S.smart?.[side.toLowerCase()];
   if(!p||!z)return alert('Data market belum siap.');
-  const noTp=!!$('noTp')?.checked; const body={symbol:S.symbol,side,entry:p,stopLoss:z.sl,takeProfit:noTp?0:z.tp,capital:toUSDT(+$('capital').value),riskPct:+$('risk').value,leverage:+$('lev').value,setup:'structure+ATR',reason:'manual',profitMode:noTp?'TANPA_BATAS':'TARGET'};
+  const entryType=String($('entryType')?.value||'MARKET').toUpperCase();
+  const typedIDR=Number($('entryPrice')?.value||0);
+  const chosenIDR=entryType==='LIMIT'&&typedIDR>0?typedIDR:fmtIDRNumber(p);
+  const entryUSDT=entryType==='LIMIT'&&typedIDR>0?toUSDT(typedIDR):p;
+  if(entryType==='LIMIT'&&!(typedIDR>0))return alert('Mode LIMIT membutuhkan Harga Entry (IDR).');
+  const noTp=!!$('noTp')?.checked;
+  const body={symbol:S.symbol,side,entry:entryUSDT,entryType,entryPrice:entryUSDT,stopLoss:z.sl,takeProfit:noTp?0:z.tp,capital:toUSDT(+$('capital').value),riskPct:+$('risk').value,leverage:+$('lev').value,setup:'structure+ATR',reason:'manual',profitMode:noTp?'TANPA_BATAS':'TARGET'};
   let rt; try{rt=await jsonFetch('/api/runtime');updateModeUI(rt)}catch(e){return alert('Runtime belum siap: '+e.message)}
   const mode=String(rt?.tradingMode||'paper').toLowerCase();
   const target=mode==='paper'?'/api/paper/order':'/api/live/order';
   const label=mode==='demo'?'BINANCE DEMO':mode==='live'?'BINANCE LIVE':'PAPER';
-  if(!confirm(`${side==='LONG'?'BUY / LONG':'SELL / SHORT'} ${S.symbol}\nEntry ${fmtIDR(p)}\nSL ${fmtIDR(z.sl)}\nTP ${noTp?'TANPA BATAS':fmtIDR(z.tp)}\nModal ${fmtIDR(+$('capital').value)}\nRisiko ${fmtIDR(+$('capital').value*body.riskPct/100)} (${body.riskPct}%)\nMode: ${label}\n\nLanjut entry?`))return;
-  const x=await jsonFetch(target,{method:'POST',headers:H(),body:JSON.stringify(body)}).catch(e=>({error:e.message}));
-  if(x.error){$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="bad">ENTRY FAILED</b><div class="note">${x.error}</div>`;return alert(x.error)}
-  $('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="good">ENTRY ${side==='LONG'?'BUY / LONG':'SELL / SHORT'} SENT</b><div class="note">Mode ${label} · Modal ${fmtIDR(+$('capital').value)} · Entry ${fmtIDR(p)} · Batas Kerugian ${fmtIDR(z.sl)} · Target ${noTp?'TANPA BATAS':fmtIDR(z.tp)} · Risiko ${body.riskPct}%</div>`;
-  if(mode==='paper'&&x.position){S.positions.push(x.position);render('positions')}
-  else{alert(`${side==='LONG'?'BUY':'SELL'} terkirim ke ${label}.`);await refreshAccount();}
-}
+  const slIDR=fromUSDT(z.sl),tpIDR=fromUSDT(z.tp);
+  if(!confirm(`${side==='LONG'?'BUY / LONG':'SELL / SHORT'} ${S.symbol}
+Mode harga: ${entryType}
+Entry ${fmtIDR(chosenIDR)}
+SL ${fmtIDR(slIDR)}
+TP ${noTp?'TANPA BATAS':fmtIDR(tpIDR)}
+Modal ${fmtIDR(+$('capital').value)}
+Risiko ${fmtIDR(+$('capital').value*body.riskPct/100)} (${body.riskPct}%)
+Mode: ${label}
 
-function render(tab='positions'){let el=$('content');if(tab==='positions')el.innerHTML=S.positions.length?`<table class="table"><tr><th>Side</th><th>Entry</th><th>SL</th><th>TP</th><th>Qty</th><th>Status</th></tr>${S.positions.map(x=>`<tr><td class="${x.side==='LONG'?'good':'bad'}">${x.side}</td><td>${fmt(x.entry)}</td><td>${fmt(x.sl)}</td><td>${fmt(x.tp)}</td><td>${fmt(x.quantity)}</td><td>${x.status}</td></tr>`).join('')}</table><div class="note">BE=${$('be').checked?'ON':'OFF'} · Trail=${$('trail').checked?'ON':'OFF'} · Partial=${$('partial').checked?'50%':'OFF'}<br>BE = pindahkan batas rugi ke harga masuk saat profit cukup. Trail = batas rugi mengikuti harga saat posisi untung. Partial = tutup sebagian posisi di target awal.</div>`:'<div class="note">Belum ada posisi paper.</div>';
-else if(tab==='confluence')el.innerHTML=`<div class="aiCard"><div><span class="label">AI CANDLE TREND</span><div id="aiSignal" class="signal wait">WAIT</div><div id="aiScore" class="note">0/100 · LOW</div></div><div class="aiReasons"><div class="label">ALASAN</div><div id="aiReason" class="note">Menunggu data candle…</div><div id="predictBox" class="predictBox note">S/R: —</div></div></div><div class="srCard"><div class="label">SUPPORT / RESISTANCE</div><div class="srLevels"><div class="srLevel"><span class="note">SUPPORT</span><b id="srSupport">—</b></div><div class="srLevel"><span class="note">RESISTANCE</span><b id="srResistance">—</b></div></div><div id="srContext" class="note" style="margin-top:7px">Belum ada level.</div></div><table class="table"><tr><th>TF</th><th>Trend</th><th>RSI</th><th>ADX</th></tr>${Object.entries(S.mtf).map(([k,v])=>`<tr><td>${k}</td><td class="${v.dir==='BULL'?'good':'bad'}">${v.dir}</td><td>${fmt(v.r)}</td><td>${fmt(v.ad)}</td></tr>`).join('')}</table><div class="note">AI membaca rangkaian candle + momentum + struktur. BUY/SELL adalah sinyal informasi; WAIT dipakai saat arah tidak dominan.</div>`;
+Lanjut entry?`))return;
+  const x=await jsonFetch(target,{method:'POST',headers:H(),body:JSON.stringify(body)}).catch(e=>({error:e.message}));
+  if(x.error){$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="bad">ENTRY GAGAL</b><div class="note">${x.error}</div>`;return alert(x.error)}
+  $('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="good">ENTRY ${side==='LONG'?'BUY / LONG':'SELL / SHORT'} TERKIRIM</b><div class="note">${entryType} · Mode ${label} · Entry ${fmtIDR(chosenIDR)} · SL ${fmtIDR(slIDR)} · Target ${noTp?'TANPA BATAS':fmtIDR(tpIDR)} · Risiko ${body.riskPct}%</div>`;
+  if(mode==='paper'&&x.position){S.positions.push(x.position);render('positions')}
+  else{await refreshAccount();}
+}
+function fmtIDRNumber(usdt){return Number(usdt||0)*USDT_IDR_RATE}
+function fromUSDT(usdt){return Number(usdt||0)*USDT_IDR_RATE}
+function render(tab){let el=$('content');
+if(tab==='confluence')el.innerHTML=`<div class="aiCard"><div><span class="label">AI CANDLE TREND</span><div id="aiSignal" class="signal wait">WAIT</div><div id="aiScore" class="note">0/100 · LOW</div></div><div class="aiReasons"><div class="label">ALASAN</div><div id="aiReason" class="note">Menunggu data candle…</div><div id="predictBox" class="predictBox note">S/R: —</div></div></div><div class="srCard"><div class="label">SUPPORT / RESISTANCE</div><div class="srLevels"><div class="srLevel"><span class="note">SUPPORT</span><b id="srSupport">—</b></div><div class="srLevel"><span class="note">RESISTANCE</span><b id="srResistance">—</b></div></div><div id="srContext" class="note" style="margin-top:7px">Belum ada level.</div></div><table class="table"><tr><th>TF</th><th>Trend</th><th>RSI</th><th>ADX</th></tr>${Object.entries(S.mtf).map(([k,v])=>`<tr><td>${k}</td><td class="${v.dir==='BULL'?'good':'bad'}">${v.dir}</td><td>${fmt(v.r)}</td><td>${fmt(v.ad)}</td></tr>`).join('')}</table><div class="note">AI membaca rangkaian candle + momentum + struktur. BUY/SELL adalah sinyal informasi; WAIT dipakai saat arah tidak dominan.</div>`;
 else if(tab==='backtest')el.innerHTML=`<div class="g3"><label class="field">Fast<input id="bf" value="20"></label><label class="field">Slow<input id="bs" value="50"></label><label class="field">Fee %/side<input id="fee" value=".04"></label></div><div class="g3" style="margin-top:7px"><label class="field">Slippage %<input id="slip" value=".02"></label><label class="field">Funding %/8h<input id="fund" value=".01"></label><label class="field">Risk %<input id="brisk" value="1"></label></div><button class="btn" style="margin-top:8px" id="runbt">Run backtest</button><div id="bout" class="note" style="margin-top:8px"></div>`;
 else if(tab==='journal')jsonFetch('/api/journal',{headers:H()}).then(rows=>{el.innerHTML=rows.length?`<table class="table"><tr><th>Time</th><th>Symbol</th><th>Side</th><th>PnL</th><th>Fee</th><th>Funding</th></tr>${rows.map(x=>`<tr><td>${new Date(x.opened_at).toLocaleString()}</td><td>${x.symbol}</td><td>${x.side}</td><td class="${x.pnl>=0?'good':'bad'}">${fmt(x.pnl)}</td><td>${fmt(x.fee)}</td><td>${fmt(x.funding)}</td></tr>`).join('')}</table>`:'<div class="note">Journal kosong.</div>'});
 else jsonFetch('/api/audit').then(rows=>el.innerHTML=`<div class="scroll"><table class="table"><tr><th>Time</th><th>Action</th><th>Detail</th></tr>${rows.map(x=>`<tr><td>${new Date(x.created_at).toLocaleTimeString()}</td><td>${x.action}</td><td>${String(x.detail).slice(0,120)}</td></tr>`).join('')}</table></div>`);
@@ -243,10 +267,31 @@ cv.addEventListener('pointerdown',e=>{let r=cv.getBoundingClientRect(),x=e.clien
 cv.addEventListener('pointermove',e=>{if(!S.drag)return;let r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top,{a,dx,py}=priceMap(),i=clamp(Math.round((x-45)/dx),0,a.length-1);if(S.drag.type==='trend'){S.drag.x2=x;S.drag.y2=y}else S.drag.b=a[i]?.c||S.drag.b;draw()});
 cv.addEventListener('pointerup',()=>{S.drag=null});
 $('entryGuard')?.addEventListener('change',e=>{ENTRY_GUARD=e.target.checked;updateEntryButtons()});
+async function closePosition(){
+  if(!confirm(`Tutup posisi ${S.symbol} sekarang pada harga market?
+Ini akan menutup posisi yang sedang terbuka.`))return;
+  const rt=await jsonFetch('/api/runtime').catch(e=>({error:e.message})); if(rt.error)return alert(rt.error);
+  const mode=String(rt.tradingMode||'paper').toLowerCase();
+  const x=await jsonFetch(mode==='paper'?'/api/paper/close':'/api/live/close',{method:'POST',headers:H(),body:JSON.stringify({symbol:S.symbol})}).catch(e=>({error:e.message}));
+  if(x.error){$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="bad">GAGAL MENUTUP</b><div class="note">${x.error}</div>`;return alert(x.error)}
+  const pnl=Number(x.pnl||x.realizedPnl||0);$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="${pnl>=0?'good':'bad'}">POSISI DITUTUP · ${pnl>=0?'PROFIT':'LOSS'} ${fmtIDR(fromUSDT(pnl))}</b><div class="note">Harga keluar ${x.exitPrice?fmtIDR(fromUSDT(x.exitPrice)):'market'} · Mode ${String(rt.tradingMode||'paper').toUpperCase()}</div>`;
+  await refreshAccount();
+}
+$('closePosition')?.addEventListener('click',closePosition);
+$('stopEntryBtn')?.addEventListener('click',()=>{MANUAL_ENTRY_STOP=true;updateEntryButtons();const b=$('stopEntryBtn');if(b){b.classList.add('active');b.textContent='⏹ ENTRY DIHENTIKAN'};if($('manualEntryStatus'))$('manualEntryStatus').textContent='Entry manual: DIHENTIKAN · posisi terbuka tetap berjalan'});
+$('resumeEntryBtn')?.addEventListener('click',()=>{MANUAL_ENTRY_STOP=false;updateEntryButtons();const b=$('stopEntryBtn');if(b){b.classList.remove('active');b.textContent='⏸ STOP ENTRY'};if($('manualEntryStatus'))$('manualEntryStatus').textContent='Entry manual: DIIZINKAN'});
+$('entryType')?.addEventListener('change',()=>{const lim=$('entryType').value==='LIMIT';$('entryPrice').disabled=!lim;if(!lim)$('entryPrice').value='';updateEntryPreview()});
+$('entryPrice')?.addEventListener('input',updateEntryPreview);
+function updateEntryPreview(){const mode=$('entryType')?.value||'MARKET',v=Number($('entryPrice')?.value||0),live=Number(S.c.at(-1)?.c||0);$('entryPreview').textContent=mode==='LIMIT'&&v>0?fmtIDR(v):live?fmtIDR(fmtIDRNumber(live)):'—'}
+$('entryPrice').disabled=true; updateEntryPreview();
+
 ['capital','risk','atrMult','rr','lev'].forEach(id=>$(id).addEventListener('input',()=>{smart();calc();scheduleDraw()}));
 $('symbol').onchange=e=>{S.symbol=e.target.value;$('pair').textContent=S.symbol;load()};$('tf').onchange=e=>{S.tf=e.target.value;load()};
 [['emaBtn','ema'],['bbBtn','bb'],['macdBtn','macd'],['vwapBtn','vwap'],['adxBtn','adx'],['atrBtn','atr']].forEach(([id,k])=>$(id).onclick=()=>{S[k]=!S[k];$(id).classList.toggle('active',S[k]);draw();calc()});
-$('trendBtn').onclick=()=>S.tool=S.tool==='trend'?null:'trend';$('fibBtn').onclick=()=>S.tool=S.tool==='fib'?null:'fib';$('srBtn').onclick=()=>{const sr=detectSR(S.c.slice(0,-1));SR_STATE=sr;S.sr=[sr.support,sr.resistance].filter(Boolean);draw();updateAITrend();alert(`Auto S/R\nSupport: ${sr.support?fmt(sr.support):'—'}\nResistance: ${sr.resistance?fmt(sr.resistance):'—'}\nContext: ${sr.context}`)};$('swingBtn').onclick=()=>{S.swings=swings(S.c);draw()};$('tv').onclick=()=>window.open(`https://www.tradingview.com/chart/?symbol=BINANCE:${S.symbol}.P`);
+$('trendBtn').onclick=()=>S.tool=S.tool==='trend'?null:'trend';$('fibBtn').onclick=()=>S.tool=S.tool==='fib'?null:'fib';$('srBtn').onclick=()=>{const sr=detectSR(S.c.slice(0,-1));SR_STATE=sr;S.sr=[sr.support,sr.resistance].filter(Boolean);draw();updateAITrend();alert(`Auto S/R
+Support: ${sr.support?fmt(sr.support):'—'}
+Resistance: ${sr.resistance?fmt(sr.resistance):'—'}
+Context: ${sr.context}`)};$('swingBtn').onclick=()=>{S.swings=swings(S.c);draw()};$('tv').onclick=()=>window.open(`https://www.tradingview.com/chart/?symbol=BINANCE:${S.symbol}.P`);
 $('long').onclick=()=>order('LONG');$('short').onclick=()=>order('SHORT');$('quickLong').onclick=()=>order('LONG');$('quickShort').onclick=()=>order('SHORT');$('reconcileDock').onclick=()=>refreshAccount();$('reconcile').onclick=()=>jsonFetch('/api/account',{headers:H()}).then(x=>{if(x.error){alert(x.error);return}let b=x.balances?.find(z=>z.asset==='USDT');$('balance').textContent=fmt(b?.balance);$('availableBalance').textContent=fmt(b?.availableBalance);$('dd').textContent=x.guard?.dd==null?'—':fmt(x.guard.dd)+'%';let p=(x.binancePositions||x.positions||[]).find(z=>z.symbol===S.symbol && Math.abs(Number(z.positionAmt||0))>0);if(p){$('upnl').textContent=fmt(p.unRealizedProfit);$('liqPrice').textContent=fmt(p.liquidationPrice)}else{$('upnl').textContent=fmt(0);$('liqPrice').textContent='—'}});
 $('kill').onclick=()=>{let on=!S.kill;if(!confirm(on?'Aktifkan KILL SWITCH?':'Matikan KILL SWITCH?'))return;jsonFetch('/api/kill-switch',{method:'POST',headers:H(),body:JSON.stringify({enabled:on,symbol:S.symbol})}).then(x=>{S.kill=x.killSwitch;$('kill').textContent=S.kill?'KILL ON':'KILL';$('mode').textContent=S.kill?'HALTED':$('mode').textContent})};
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');render(t.dataset.tab);if(t.dataset.tab==='backtest')setTimeout(()=>{let b=$('runbt');if(b)b.onclick=backtest},0)});
@@ -264,3 +309,9 @@ document.getElementById('clearSignals')?.addEventListener('click',()=>{if(!confi
 renderSignalDrop();
 ensureAuth();
 Promise.all([jsonFetch('/api/health'),jsonFetch('/api/runtime')]).then(([x,rt])=>{updateModeUI(rt);S.kill=!!x.killSwitch;$('kill').textContent=S.kill?'KILL ON':'KILL'}).catch(e=>{$('conn').textContent='API ERROR';$('conn').title=e.message});render();resize();load();setTimeout(()=>{resize();safeDraw()},250);setInterval(updateAITrend,1500);setInterval(updateLiveSignal,500);setInterval(scheduleLivePrediction,30000);oiTimer=setInterval(depth,3000);accountTimer=setInterval(refreshAccount,2000);
+
+
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstallPrompt=e;const b=$('installPwa');if(b){b.style.display='inline-block';b.classList.add('pwaInstall')}});
+$('installPwa')?.addEventListener('click',async()=>{if(!deferredInstallPrompt)return;deferredInstallPrompt.prompt();await deferredInstallPrompt.userChoice;deferredInstallPrompt=null;$('installPwa').style.display='none'});
+window.addEventListener('appinstalled',()=>{$('installPwa')?.remove()});
+if('serviceWorker' in navigator) window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
