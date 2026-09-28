@@ -182,14 +182,35 @@ function predictiveCandle(c){
   if(sr.resistance&&sr.distanceResistance!=null&&sr.distanceResistance<0.12&&sr.context==='BETWEEN_LEVELS'){bull-=8;reason.push('Dekat resistance → BUY diperlambat');}
   if(sr.support&&sr.distanceSupport!=null&&sr.distanceSupport<0.12&&sr.context==='BETWEEN_LEVELS'){bear-=8;reason.push('Dekat support → SELL diperlambat');}
   bull=Math.max(0,Math.min(100,bull)); bear=Math.max(0,Math.min(100,bear));
+  // Multi-timeframe confluence is an important tie-breaker for the realtime projection.
+  // It is deliberately capped so one timeframe cannot dominate the candle evidence.
+  const mtfWeights={ '1m':4, '5m':8, '15m':10, '1h':12, '4h':10 };
+  let mtfBull=0, mtfBear=0;
+  if(S.mtf && typeof S.mtf==='object'){
+    for(const [tf,w] of Object.entries(mtfWeights)){
+      const v=S.mtf[tf];
+      if(!v)continue;
+      const adx=Number(v.ad);
+      const strength=Number.isFinite(adx)?clamp(adx/35,0.55,1.25):0.8;
+      if(v.dir==='BULL')mtfBull+=w*strength;
+      else if(v.dir==='BEAR')mtfBear+=w*strength;
+    }
+  }
+  if(mtfBull>mtfBear+3){bull+=Math.min(28,mtfBull);reason.push('Konfluensi MTF bullish');}
+  else if(mtfBear>mtfBull+3){bear+=Math.min(28,mtfBear);reason.push('Konfluensi MTF bearish');}
+
+  // Use a soft gate: WAIT is reserved for genuinely balanced/weak evidence.
+  // This fixes the previous behaviour where a bullish MTF structure could still
+  // produce a page full of WAIT rows.
+  bull=Math.max(0,Math.min(100,bull)); bear=Math.max(0,Math.min(100,bear));
   const gap=Math.abs(bull-bear), score=Math.max(bull,bear);
   let side='WAIT';
-  // Do not force a direction, but avoid the previous overly-strict 62/16 gate that
-  // turned normal bullish/bearish market structure into WAIT almost all the time.
-  if(bull>=50&&bull-bear>=8)side='BUY';
-  else if(bear>=50&&bear-bull>=8)side='SELL';
+  if(bull>=44&&gap>=6)side='BUY';
+  else if(bear>=44&&gap>=6)side='SELL';
+  else if(bull>=38&&bull>bear+4)side='BUY';
+  else if(bear>=38&&bear>bull+4)side='SELL';
   else reason.push('Konfluensi belum cukup → WAIT');
-  return {side,score,bull,bear,gap,reason:reason.slice(-7),strength:score>=75?'HIGH':score>=60?'MEDIUM':'LOW',sr};
+  return {side,score,bull,bear,gap,mtfBull,mtfBear,reason:reason.slice(-8),strength:score>=75?'HIGH':score>=58?'MEDIUM':'LOW',sr};
 }
 function aiCandleTrend(c){
   if(!c||c.length<30)return {side:'WAIT',score:0,reason:['Need at least 30 candles'],strength:'LOW'};
@@ -274,8 +295,12 @@ function projectFutureSignals(){
   for(let h=1;h<=26;h++){
     const decay=Math.max(.28,1-(h-1)*.075);
     let bull=Number(base.bull||0),bear=Number(base.bear||0);
-    if(trend.side==='BUY')bull+=12*decay;
-    if(trend.side==='SELL')bear+=12*decay;
+    // Carry the current directional evidence forward, but reduce only the
+    // forward-added conviction. The current candle/MTF evidence stays intact.
+    if(trend.side==='BUY')bull+=10*decay;
+    if(trend.side==='SELL')bear+=10*decay;
+    if(Number(base.mtfBull||0)>Number(base.mtfBear||0)+3)bull+=6*decay;
+    if(Number(base.mtfBear||0)>Number(base.mtfBull||0)+3)bear+=6*decay;
     if(emaBias>2)bull+=Math.min(10,emaBias)*decay;
     if(emaBias<-2)bear+=Math.min(10,-emaBias)*decay;
     if(rejection>3)bull+=Math.min(10,rejection)*decay;
@@ -292,9 +317,13 @@ function projectFutureSignals(){
     bull=Math.round(clamp(bull,0,100));
     bear=Math.round(clamp(bear,0,100));
     let side='WAIT',score=Math.max(bull,bear),gap=Math.abs(bull-bear);
-    if(bull>=50&&gap>=8)side='BUY';
-    else if(bear>=50&&gap>=8)side='SELL';
-    const strength=score>=78?'HIGH':score>=60?'MEDIUM':'LOW';
+    // Projection uses the same soft gate as the live signal. WAIT only remains
+    // when both directions are close or the evidence is genuinely weak.
+    if(bull>=44&&gap>=6)side='BUY';
+    else if(bear>=44&&gap>=6)side='SELL';
+    else if(bull>=38&&bull>bear+4)side='BUY';
+    else if(bear>=38&&bear>bull+4)side='SELL';
+    const strength=score>=75?'HIGH':score>=58?'MEDIUM':'LOW';
     const reason=side==='BUY'
       ? (sr.support&&virtual<=sr.support+atr*.35?'support + bullish bias':h<=2?'momentum + wick/body':'bullish bias decaying')
       : side==='SELL'
