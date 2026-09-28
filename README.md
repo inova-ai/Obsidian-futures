@@ -1,4 +1,4 @@
-# Obsidian Futures v5.7 — Binance Demo / Realtime
+# Obsidian Futures v5.8 — Binance Demo / Realtime
 
 Vercel-ready Binance USDⓈ-M Futures dashboard with realtime market data, Binance Demo account balance/positions, and explicit BUY/SELL entry controls.
 
@@ -7,7 +7,7 @@ Vercel-ready Binance USDⓈ-M Futures dashboard with realtime market data, Binan
 - **Account balance/positions no longer require PostgreSQL** when `BINANCE_API_KEY` and `BINANCE_API_SECRET` are supplied in Vercel. This fixes the common blank `Balance USDT` / `Available USDT` state caused by the old DB middleware.
 - **Realtime market WebSocket fixed.** The frontend now uses the combined `/stream?streams=...` endpoint instead of `/market/stream`.
 - **Order-book depth updates are merged** with the snapshot instead of replacing the whole book with each delta.
-- **Account refresh is 2 seconds** and depth/open-interest refresh is 3 seconds.
+- **Account refresh is 2 seconds** and depth/open-interest refresh is 3 seconds. A separate market-ticker fallback refreshes the current candle about every 1.5 seconds so the chart continues moving even if the browser WebSocket reconnects.
 - **BUY / LONG and SELL / SHORT buttons are explicit.** In `demo` mode they send exchange orders to Binance Demo; in `paper` mode they create local paper positions; in `live` mode they can send real orders only when `ENABLE_LIVE_TRADING=true`.
 - **Header shows account environment** (`BINANCE DEMO`, `BINANCE LIVE`, or `PAPER`).
 - **Kill switch works without PostgreSQL** as an in-memory safety fallback; database persistence is still used when PostgreSQL is configured.
@@ -53,3 +53,12 @@ For Binance Demo, the market/chart data may mirror live market conditions while 
 
 ## Deploy
 Import the ZIP/project into Vercel. No custom build command is required. Node.js 24.x is specified in `package.json`. The Vercel Function region remains `sin1`.
+
+
+## v5.8 UI/realtime additions
+- Account/Balance is moved into a clear center dashboard below the chart instead of the old sidebar location.
+- Live position panel shows side, entry, mark, quantity, unrealized PnL, ROE, and the last realized PnL when a position is closed.
+- Large center BUY/LONG and SELL/SHORT quick-entry buttons are provided in addition to the execution controls.
+- Live candle direction, AI entry direction, candle-close countdown, and Jakarta clock are shown continuously.
+- Chart zoom has dedicated + / − / reset controls and mouse-wheel zoom.
+- `/api/market/ticker` provides a no-cache Binance REST fallback for the current candle/mark/index/funding data.
