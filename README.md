@@ -52,3 +52,9 @@ If `/api/health` returns an error, inspect the Vercel Function logs before enabl
 The dashboard now keeps the market/chart/auth surface available even when PostgreSQL is not connected. Add `DATABASE_URL` (or `POSTGRES_URL`) in Vercel Project Settings → Environment Variables, then redeploy. Vercel environment-variable changes apply to new deployments.
 
 If you do not have a database yet, set `MASTER_KEY` and optionally `ADMIN_USERNAME`/`ADMIN_PASSWORD`; the Login screen can authenticate in environment-admin mode. Persistent journal, paper positions, credentials, kill-switch state, and settings still require PostgreSQL.
+
+
+## Vercel region
+This version pins the Node.js Function to `sin1` (Singapore) so server-side
+requests to external market-data services originate from the configured
+Singapore Function region. Redeploy after changing `vercel.json`.
