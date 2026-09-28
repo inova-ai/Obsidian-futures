@@ -1,4 +1,4 @@
-## v5.22 — Realized PNL & Balance Reconcile
+## v5.23 — Full Sizing + Position + Realized Balance Reconcile
 - Close endpoint waits for Binance position to reach 0, then reads realized PNL and wallet balance.
 - UI shows realized PNL, post-close balance, and wallet delta after close.
 - Account refresh continues to use Binance as the source of truth.
