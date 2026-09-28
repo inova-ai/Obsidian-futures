@@ -14,7 +14,7 @@ app.use((req,res,next)=>{res.setHeader('X-Content-Type-Options','nosniff');res.s
 app.use(express.json({limit:'1mb'})); 
 const rate=new Map();
 function rateLimit(req,res,next){const key=(req.ip||'unknown')+'|'+req.path,now=Date.now();let x=rate.get(key);if(!x||now-x.t>60000)x={t:now,n:0};x.n++;rate.set(key,x);if(x.n>120)return res.status(429).json({error:'Rate limit exceeded'});next()}
-app.get('/api',(req,res)=>res.json({ok:true,service:'obsidian-futures',version:'5.8.0-vercel'}));
+app.get('/api',(req,res)=>res.json({ok:true,service:'obsidian-futures',version:'5.9.0-vercel'}));
 app.use('/api',rateLimit);
 
 const TRADING_MODE=String(process.env.TRADING_MODE|| (process.env.ENABLE_LIVE_TRADING==='true'?'live':'demo')).trim().toLowerCase();
@@ -22,6 +22,7 @@ const IS_DEMO=TRADING_MODE==='demo', LIVE=TRADING_MODE==='live' && process.env.E
 const BASE=IS_DEMO?'https://demo-fapi.binance.com':(process.env.BINANCE_BASE_URL||'https://fapi.binance.com');
 const WS_BASE=IS_DEMO?'wss://demo-fstream.binance.com':(process.env.BINANCE_WS_URL||'wss://fstream.binance.com');
 const BYBIT_BASE=process.env.BYBIT_BASE_URL||'https://api.bybit.com';
+const USDT_IDR_RATE=Number(process.env.USDT_IDR_RATE||16500);
 const MAXLEV=Number(process.env.MAX_LEVERAGE||20), MAXRISK=Number(process.env.MAX_RISK_PCT||2), MAX_DD=Number(process.env.MAX_DAILY_LOSS_PCT||5);
 const ALLOWED=new Set((process.env.ALLOWED_SYMBOLS||'BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT').split(',').map(x=>x.trim().toUpperCase()));
 const MASTER=process.env.MASTER_KEY||'', DATABASE_URL=process.env.DATABASE_URL||process.env.POSTGRES_URL||process.env.POSTGRES_PRISMA_URL||process.env.NEON_DATABASE_URL||'';
@@ -78,13 +79,14 @@ app.get('/api/runtime',(_,r)=>r.json({
   vercelRegion:process.env.VERCEL_REGION||'unknown',
   vercelUrl:process.env.VERCEL_URL||'unknown',
   tradingMode:TRADING_MODE,
+  usdtIdrRate:USDT_IDR_RATE,
   binanceEnvironment:IS_DEMO?'demo':'live',
   binanceBase:BASE,
   binanceWs:WS_BASE,
   bybitBase:BYBIT_BASE
 }));
 
-app.get('/api/health',async(_,r)=>{try{let db='not-configured';if(pool){await ensureDb();db='postgres'}r.json({ok:true,version:'5.8.0-vercel',live:LIVE,tradingMode:TRADING_MODE,binanceEnvironment:IS_DEMO?'demo':'live',binanceBase:BASE,binanceWs:WS_BASE,binanceCredentialsConfigured:!!(ENV_BINANCE_API_KEY&&ENV_BINANCE_API_SECRET),killSwitch:await getKillSwitch(),maxLeverage:MAXLEV,maxRiskPct:MAXRISK,dailyDrawdownPct:MAX_DD,db,auth:pool?'postgres':(ENV_ADMIN_USER&&ENV_ADMIN_PASSWORD?'env-admin':'unconfigured')})}catch(e){r.status(503).json({ok:false,db:'down',auth:ENV_ADMIN_USER&&ENV_ADMIN_PASSWORD?'env-admin':'unconfigured',error:e.message})}});
+app.get('/api/health',async(_,r)=>{try{let db='not-configured';if(pool){await ensureDb();db='postgres'}r.json({ok:true,version:'5.9.0-vercel',live:LIVE,tradingMode:TRADING_MODE,binanceEnvironment:IS_DEMO?'demo':'live',binanceBase:BASE,binanceWs:WS_BASE,binanceCredentialsConfigured:!!(ENV_BINANCE_API_KEY&&ENV_BINANCE_API_SECRET),killSwitch:await getKillSwitch(),maxLeverage:MAXLEV,maxRiskPct:MAXRISK,dailyDrawdownPct:MAX_DD,db,auth:pool?'postgres':(ENV_ADMIN_USER&&ENV_ADMIN_PASSWORD?'env-admin':'unconfigured')})}catch(e){r.status(503).json({ok:false,db:'down',auth:ENV_ADMIN_USER&&ENV_ADMIN_PASSWORD?'env-admin':'unconfigured',error:e.message})}});
 app.get('/api/auth/status',async(qr,r)=>{try{if(pool){try{await ensureDb();const u=(await q('SELECT username FROM users WHERE id=1'))[0];return r.json({configured:!!u,authenticated:!!optionalAuth(qr),username:u?.username||null,mode:'postgres'})}catch(e){if(!ENV_ADMIN_USER||!ENV_ADMIN_PASSWORD)throw e}}if(!ENV_ADMIN_USER||!ENV_ADMIN_PASSWORD)throw Error('Authentication is not configured. Set ADMIN_USERNAME, ADMIN_PASSWORD and MASTER_KEY in Vercel.');r.json({configured:true,authenticated:!!optionalAuth(qr),username:ENV_ADMIN_USER,mode:'env'})}catch(e){r.status(503).json({error:e.message,code:'AUTH_NOT_CONFIGURED'})}});
 app.post('/api/auth/setup',async(qr,r)=>{try{if(!pool)throw Error('Database belum dikonfigurasi. Untuk mode Vercel tanpa database, isi ADMIN_USERNAME, ADMIN_PASSWORD dan MASTER_KEY lalu gunakan Login.');await ensureDb();if((await q('SELECT id FROM users WHERE id=1')).length)throw Error('User already configured');const username=String(qr.body.username||'admin').trim(),password=String(qr.body.password||'');if(!username||password.length<12)throw Error('Username required and password must be at least 12 characters');const ph=passwordHash(password);await exec('INSERT INTO users(id,username,salt,password_hash,created_at) VALUES(1,$1,$2,$3,$4)',[username,ph.salt,ph.hash,Date.now()]);await audit('AUTH_SETUP',username);const token=makeToken(username);r.json({token,username,expiresInSec:SESSION_TTL/1000,mode:'postgres'})}catch(e){r.status(400).json({error:e.message})}});
 app.post('/api/auth/login',async(qr,r)=>{try{const suppliedUser=String(qr.body.username||'').trim(),suppliedPass=String(qr.body.password||'');let username='';if(pool){try{await ensureDb();const u=(await q('SELECT * FROM users WHERE id=1'))[0];if(u){const got=crypto.scryptSync(suppliedPass,u.salt,64,{N:16384,r:8,p:1});if(!crypto.timingSafeEqual(got,Buffer.from(u.password_hash,'hex')))throw Error('Invalid credentials');username=u.username;const row=(await q('SELECT totp_enc FROM credentials WHERE id=1'))[0];if(row?.totp_enc&&String(qr.body.code||'').trim()!==totp(dec(row.totp_enc)))throw Error('Valid 2FA code required')}}catch(e){if(!ENV_ADMIN_USER||!ENV_ADMIN_PASSWORD||e.message==='Invalid credentials'||e.message==='Valid 2FA code required')throw e}}if(!username){if(!ENV_ADMIN_USER||!ENV_ADMIN_PASSWORD)throw Error('Run setup first or configure ADMIN_USERNAME and ADMIN_PASSWORD in Vercel');if(suppliedUser!==ENV_ADMIN_USER||suppliedPass!==ENV_ADMIN_PASSWORD)throw Error('Invalid credentials');username=ENV_ADMIN_USER}const token=makeToken(username);if(pool)await audit('AUTH_LOGIN',username);r.json({token,username,expiresInSec:SESSION_TTL/1000,mode:pool?'postgres':'env'})}catch(e){r.status(401).json({error:e.message})}});
