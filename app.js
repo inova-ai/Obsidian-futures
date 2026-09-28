@@ -7,7 +7,8 @@ async function ensureAuth(){try{let z=await jsonFetch('/api/auth/status');if(z.a
 let AI_TREND={side:'WAIT',score:0,reason:[],lastNotified:null,sr:null};
 let SR_STATE={support:null,resistance:null,context:'NO_LEVEL',distanceSupport:null,distanceResistance:null};
 let SIGNALS=[];
-const SIGNAL_KEY='obsidian_signal_drop_v528';
+const SIGNAL_KEY='obsidian_signal_drop_v529';
+const AUTO_ENTRY=false; // Startup is read-only: never place an order automatically.
 let lastSignalSlot=null,lastSignalSide=null;
 try{SIGNALS=JSON.parse(localStorage.getItem(SIGNAL_KEY)||'[]')}catch{SIGNALS=[]}
 let ws=null,oiTimer=null,pollTimer=null,accountTimer=null,livePollTimer=null,clockTimer=null;
@@ -123,7 +124,7 @@ function connect(){if(wsRetryTimer){clearTimeout(wsRetryTimer);wsRetryTimer=null
 }else if(d.e==='markPriceUpdate'){S.market.mark=+d.p;S.market.index=+d.i;S.market.funding=+d.r;$('mark').textContent=fmtIDR(d.p);$('index').textContent=fmtIDR(d.i);$('funding').textContent=(+d.r*100).toFixed(4)+'%'}else if(d.e==='aggTrade'){const price=+d.p;if(Number.isFinite(price)){const q=S.c.at(-1);if(q){q.c=price;q.h=Math.max(q.h,price);q.l=Math.min(q.l,price);lastLivePriceTs=Date.now();$('price').textContent=fmtIDR(price);S.market.last=price;updateLiveSignal();scheduleDraw();}}}else if(d.e==='forceOrder'){S.market.liq=d.o?.q||0;$('liq').textContent=`${d.o?.S||''} ${fmt(+d.o?.p||0)} × ${fmt(+d.o?.q||0)}`}}catch{}}}
 function tfMillis(tf){const m={1:60000,3:180000,5:300000,15:900000,30:1800000,1.0:3600000};if(tf.endsWith('m'))return Number(tf.slice(0,-1))*60000;if(tf.endsWith('h'))return Number(tf.slice(0,-1))*3600000;if(tf.endsWith('d'))return Number(tf.slice(0,-1))*86400000;return 300000}
 function updateLiveSignal(){if(!S.c.length)return;const c=S.c.at(-1),closed=S.c.length>1?S.c.slice(0,-1):S.c,t=predictiveCandle(closed);const dir=c.c>c.o?'NAIK · B':c.c<c.o?'TURUN · S':'DATAR';const box=$('liveSignalBox'),sig=$('liveEntrySignal'),score=$('liveSignalScore'),cd=$('candleCountdown'),ct=$('candleTime'),clock=$('liveClock'),cdir=$('liveCandleDirection'),cprice=$('liveCandlePrice'),ls=$('signalLiveSide'),lm=$('signalLiveMeta');if(sig){sig.textContent=t.side==='BUY'?'B':t.side==='SELL'?'S':'WAIT';sig.className='signal '+(t.side==='BUY'?'good':t.side==='SELL'?'bad':'wait')}if(score)score.textContent=`${t.score||0}/100 · ${t.strength||'LOW'} · ${t.reason?.[0]||'Membaca sumbu dan momentum'}`;if(box)box.className='liveBox '+(t.side==='BUY'?'signalBuy':t.side==='SELL'?'signalSell':'signalWait');if(cdir){cdir.textContent=dir;cdir.className=''+(dir.startsWith('NAIK')?'good':dir.startsWith('TURUN')?'bad':'wait')}if(cprice)cprice.textContent=`${fmtIDR(c.c)} · Buka ${fmtIDR(c.o)}`;const ms=tfMillis(S.tf),remain=Math.max(0,(c.t+ms)-Date.now()),sec=Math.floor(remain/1000),mm=String(Math.floor(sec/60)).padStart(2,'0'),ss=String(sec%60).padStart(2,'0');if(cd)cd.textContent=`${mm}:${ss}`;if(ct)ct.textContent=`Candle ${new Date(c.t).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})}–${new Date(c.t+ms).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})} WIB`;if(clock)clock.textContent=new Date().toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit',second:'2-digit'});if(ls){ls.textContent=t.side==='BUY'?'B ↑':t.side==='SELL'?'S ↓':'WAIT •';ls.className='signalSide '+(t.side==='BUY'?'good':t.side==='SELL'?'bad':'wait')}if(lm)lm.textContent=`${t.score||0}/100 · ${dir} · close ${mm}:${ss}`;AI_TREND=t; updateEntryButtons()}
-function renderAccountDock(x){if(!x)return;const b=x.balances?.find(z=>z.asset==='USDT'),p=(x.binancePositions||x.positions||[]).find(z=>z.symbol===S.symbol&&Math.abs(Number(z.positionAmt||0))>0);S.accountPosition=p||null;scheduleDraw();const bal=Number(b?.balance||0),av=Number(b?.availableBalance||0),up=Number(p?.unRealizedProfit||0),entry=Number(p?.entryPrice||0),mark=Number(p?.markPrice||S.market.mark||0),qty=Number(p?.positionAmt||0),notional=Math.abs(entry*qty),roe=notional?up/Math.max(1,Math.abs(notional)/Math.max(1,Number(p?.leverage||+$('lev').value||1)))*100:0,rp=Number(x.lastRealizedPnL);$('dockBalance').textContent=fmtIDR(bal);$('dockDanaTersedia').textContent=fmtIDR(av);$('dockUpnl').textContent=fmtIDR(up);$('dockUpnl').className=up>0?'pnlProfit':up<0?'pnlLoss':'';$('dockDD').textContent=x.guard?.dd==null?'—':fmt(x.guard.dd)+'%';if($('dockRealized')){$('dockRealized').textContent=Number.isFinite(rp)?fmtIDR(rp):'—';$('dockRealized').className=Number.isFinite(rp)?(rp>=0?'pnlProfit':'pnlLoss'):''}$('accountDockMode').textContent=x.accountType||'ACCOUNT';$('dockPositionStatus').textContent=p?'OPEN POSITION':'NO OPEN POSITION';$('dockArah').textContent=p?(Number(p.positionAmt)>0?'LONG':'SHORT'):'—';$('dockArah').className=p?(Number(p.positionAmt)>0?'good':'bad'):'';$('dockHargaMasuk').textContent=p?fmtIDR(entry):'—';$('dockHargaMark').textContent=p?fmtIDR(mark):fmtIDR(S.market.mark);$('dockJumlah').textContent=p?fmt(Math.abs(qty)):'—';$('dockPnl').textContent=p?fmtIDR(up):'—';$('dockPnl').className=p?(up>=0?'pnlProfit':'pnlLoss'):'';$('dockRoe').textContent=p?fmt(roe)+'%':'—';$('balance').textContent=fmtIDR(bal);$('availableBalance').textContent=fmtIDR(av);$('upnl').textContent=fmtIDR(up);$('liqPrice').textContent=p?fmtIDR(p.liquidationPrice):'—';$('dd').textContent=x.guard?.dd==null?'—':fmt(x.guard.dd)+'%';const closeBtn=$('closePosition'),entryBtns=[$('long'),$('short'),$('quickLong'),$('quickShort')].filter(Boolean);if(closeBtn){closeBtn.disabled=!p;closeBtn.style.opacity=p?'1':'.45'}entryBtns.forEach(btn=>{btn.disabled=!!p;btn.style.opacity=p?'.45':'1';btn.title=p?'Tutup posisi aktif terlebih dahulu sebelum entry baru.':''});if(p){$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="${up>=0?'good':'bad'}">${up>=0?'PROFIT':'LOSS'} ${fmtIDR(up)} · OPEN</b><div class="note">${Number(p.positionAmt)>0?'BUY / LONG':'SELL / SHORT'} · Masuk ${fmtIDR(entry)} · Mark ${fmtIDR(mark)} · Jumlah ${fmt(Math.abs(qty))} · ROE ${fmt(roe)}%</div><div class="note bad">Posisi aktif Binance: kalkulator entry baru bukan posisi live. Tutup posisi ini sebelum entry berikutnya.</div>`}else if(Number.isFinite(rp)){$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="${rp>=0?'good':'bad'}">LAST REALIZED: ${rp>=0?'PROFIT':'LOSS'} ${fmtIDR(rp)}</b><div class="note">LIVE POSITION: <b>CLOSED / 0 BTC</b> · Saldo diambil langsung dari Binance.</div>`}else{$('orderResult').style.display='none'}}
+function renderAccountDock(x){if(!x)return;const b=x.balances?.find(z=>z.asset==='USDT'),p=(x.binancePositions||x.positions||[]).find(z=>z.symbol===S.symbol&&Math.abs(Number(z.positionAmt||0))>0);S.accountPosition=p||null;scheduleDraw();const bal=Number(b?.balance||0),av=Number(b?.availableBalance||0),up=Number(p?.unRealizedProfit||0),entry=Number(p?.entryPrice||0),mark=Number(p?.markPrice||S.market.mark||0),qty=Number(p?.positionAmt||0),notional=Math.abs(entry*qty),roe=notional?up/Math.max(1,Math.abs(notional)/Math.max(1,Number(p?.leverage||+$('lev').value||1)))*100:0,rp=Number(x.lastRealizedPnL);$('dockBalance').textContent=fmtIDR(bal);$('dockDanaTersedia').textContent=fmtIDR(av);$('dockUpnl').textContent=fmtIDR(up);$('dockUpnl').className=up>0?'pnlProfit':up<0?'pnlLoss':'';$('dockDD').textContent=x.guard?.dd==null?'—':fmt(x.guard.dd)+'%';if($('dockRealized')){$('dockRealized').textContent=Number.isFinite(rp)?fmtIDR(rp):'—';$('dockRealized').className=Number.isFinite(rp)?(rp>=0?'pnlProfit':'pnlLoss'):''}$('accountDockMode').textContent=x.accountType||'ACCOUNT';$('dockPositionStatus').textContent=p?'OPEN POSITION · TERDETEKSI DI BINANCE':'NO OPEN POSITION';$('dockArah').textContent=p?(Number(p.positionAmt)>0?'LONG':'SHORT'):'—';$('dockArah').className=p?(Number(p.positionAmt)>0?'good':'bad'):'';$('dockHargaMasuk').textContent=p?fmtIDR(entry):'—';$('dockHargaMark').textContent=p?fmtIDR(mark):fmtIDR(S.market.mark);$('dockJumlah').textContent=p?fmt(Math.abs(qty)):'—';$('dockPnl').textContent=p?fmtIDR(up):'—';$('dockPnl').className=p?(up>=0?'pnlProfit':'pnlLoss'):'';$('dockRoe').textContent=p?fmt(roe)+'%':'—';$('balance').textContent=fmtIDR(bal);$('availableBalance').textContent=fmtIDR(av);$('upnl').textContent=fmtIDR(up);$('liqPrice').textContent=p?fmtIDR(p.liquidationPrice):'—';$('dd').textContent=x.guard?.dd==null?'—':fmt(x.guard.dd)+'%';const closeBtn=$('closePosition'),entryBtns=[$('long'),$('short'),$('quickLong'),$('quickShort')].filter(Boolean);if(closeBtn){closeBtn.disabled=!p;closeBtn.style.opacity=p?'1':'.45'}entryBtns.forEach(btn=>{btn.disabled=!!p;btn.style.opacity=p?'.45':'1';btn.title=p?'Tutup posisi aktif terlebih dahulu sebelum entry baru.':''});if(p){$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="${up>=0?'good':'bad'}">${up>=0?'PROFIT':'LOSS'} ${fmtIDR(up)} · OPEN</b><div class="note">${Number(p.positionAmt)>0?'BUY / LONG':'SELL / SHORT'} · Masuk ${fmtIDR(entry)} · Mark ${fmtIDR(mark)} · Jumlah ${fmt(Math.abs(qty))} · ROE ${fmt(roe)}%</div><div class="note bad">Posisi ini terdeteksi dari akun Binance saat sinkronisasi. Membuka halaman tidak membuat order baru. Tutup posisi ini sebelum entry berikutnya.</div>`}else if(Number.isFinite(rp)){$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="${rp>=0?'good':'bad'}">LAST REALIZED: ${rp>=0?'PROFIT':'LOSS'} ${fmtIDR(rp)}</b><div class="note">LIVE POSITION: <b>CLOSED / 0 BTC</b> · Saldo diambil langsung dari Binance.</div>`}else{$('orderResult').style.display='none'}}
 
 function updateModeUI(rt){if(!rt)return;const mode=String(rt.tradingMode||'paper').toUpperCase();$('mode').textContent=mode;$('accountMode').textContent=mode==='DEMO'?'BINANCE DEMO':mode==='LIVE'?'BINANCE LIVE':'PAPER';const note=$('executionNote');if(note)note.textContent=mode==='DEMO'?'BUY/SELL akan mengirim order ke Binance Futures DEMO (virtual funds).':mode==='LIVE'?'BUY/SELL akan mengirim order ke Binance Futures LIVE. Periksa API permission sebelum entry.':'BUY/SELL hanya membuat posisi PAPER lokal.';}
 function scheduleReconnect(){if(wsRetryTimer)return;const delay=Math.min(30000,Math.max(1000,2**wsRetry*1000));wsRetry=Math.min(wsRetry+1,5);wsRetryTimer=setTimeout(()=>{wsRetryTimer=null;connect()},delay)}
@@ -158,32 +159,37 @@ function detectSR(c){
   return {support:support?.p||null,resistance:resistance?.p||null,context,distanceSupport:ds,distanceResistance:dr,atr};
 }
 function predictiveCandle(c){
-  const sr=detectSR(c); if(!c||c.length<35)return {side:'WAIT',score:0,reason:['Need candle history'],strength:'LOW',sr};
+  const sr=detectSR(c); if(!c||c.length<35)return {side:'WAIT',score:0,bull:0,bear:0,reason:['Need candle history'],strength:'LOW',sr};
   const a=c.slice(0,-1), n=a.length-1, x=a[n], prev=a[n-1];
   let bull=0,bear=0,reason=[];
   const range=Math.max(1e-12,x.h-x.l),body=Math.abs(x.c-x.o),upper=x.h-Math.max(x.o,x.c),lower=Math.min(x.o,x.c)-x.l;
-  if(lower/range>=.45){bull+=18;reason.push('Lower-wick rejection');}
-  if(upper/range>=.45){bear+=18;reason.push('Upper-wick rejection');}
-  if(body/range>=.55&&x.c>x.o){bull+=12;reason.push('Bullish body close kuat');}
-  if(body/range>=.55&&x.c<x.o){bear+=12;reason.push('Bearish body close kuat');}
-  if(x.c>prev.c){bull+=7}else if(x.c<prev.c){bear+=7}
+  if(lower/range>=.40){bull+=16;reason.push('Lower-wick rejection');}
+  if(upper/range>=.40){bear+=16;reason.push('Upper-wick rejection');}
+  if(body/range>=.50&&x.c>x.o){bull+=12;reason.push('Bullish body close kuat');}
+  if(body/range>=.50&&x.c<x.o){bear+=12;reason.push('Bearish body close kuat');}
+  if(x.c>prev.c){bull+=6}else if(x.c<prev.c){bear+=6}
   const recent=a.slice(-8), ups=recent.filter((z,i)=>i&&z.c>recent[i-1].c).length, downs=recent.filter((z,i)=>i&&z.c<recent[i-1].c).length;
   if(ups>=5){bull+=12;reason.push('Momentum candle bullish');} if(downs>=5){bear+=12;reason.push('Momentum candle bearish');}
   const e9=EMA(a.map(z=>z.c),9),e21=EMA(a.map(z=>z.c),21); const slope9=e9[n]-e9[Math.max(0,n-3)], slope21=e21[n]-e21[Math.max(0,n-3)];
-  if(e9[n]>e21[n]&&slope9>0&&slope21>0){bull+=10;reason.push('EMA momentum naik');}
-  if(e9[n]<e21[n]&&slope9<0&&slope21<0){bear+=10;reason.push('EMA momentum turun');}
-  if(sr.context==='SUPPORT_REJECTION'){bull+=22;reason.push('Rejection di support');}
-  if(sr.context==='RESISTANCE_REJECTION'){bear+=22;reason.push('Rejection di resistance');}
-  if(sr.support&&x.c>sr.support&&prev.c<=sr.support){bull+=16;reason.push('Reclaim support');}
-  if(sr.resistance&&x.c<sr.resistance&&prev.c>=sr.resistance){bear+=16;reason.push('Reject resistance');}
-  if(sr.resistance&&x.c>sr.resistance&&prev.c<=sr.resistance){bull+=20;reason.push('Breakout resistance');}
-  if(sr.support&&x.c<sr.support&&prev.c>=sr.support){bear+=20;reason.push('Breakdown support');}
-  if(sr.resistance&&sr.distanceResistance!=null&&sr.distanceResistance<0.12&&sr.context==='BETWEEN_LEVELS'){bull-=12;reason.push('Terlalu dekat resistance → hindari BUY');}
-  if(sr.support&&sr.distanceSupport!=null&&sr.distanceSupport<0.12&&sr.context==='BETWEEN_LEVELS'){bear-=12;reason.push('Terlalu dekat support → hindari SELL');}
+  if(e9[n]>e21[n]&&slope9>0){bull+=12;reason.push('EMA momentum naik');}
+  if(e9[n]<e21[n]&&slope9<0){bear+=12;reason.push('EMA momentum turun');}
+  if(sr.context==='SUPPORT_REJECTION'){bull+=20;reason.push('Rejection di support');}
+  if(sr.context==='RESISTANCE_REJECTION'){bear+=20;reason.push('Rejection di resistance');}
+  if(sr.support&&x.c>sr.support&&prev.c<=sr.support){bull+=14;reason.push('Reclaim support');}
+  if(sr.resistance&&x.c<sr.resistance&&prev.c>=sr.resistance){bear+=14;reason.push('Reject resistance');}
+  if(sr.resistance&&x.c>sr.resistance&&prev.c<=sr.resistance){bull+=18;reason.push('Breakout resistance');}
+  if(sr.support&&x.c<sr.support&&prev.c>=sr.support){bear+=18;reason.push('Breakdown support');}
+  if(sr.resistance&&sr.distanceResistance!=null&&sr.distanceResistance<0.12&&sr.context==='BETWEEN_LEVELS'){bull-=8;reason.push('Dekat resistance → BUY diperlambat');}
+  if(sr.support&&sr.distanceSupport!=null&&sr.distanceSupport<0.12&&sr.context==='BETWEEN_LEVELS'){bear-=8;reason.push('Dekat support → SELL diperlambat');}
   bull=Math.max(0,Math.min(100,bull)); bear=Math.max(0,Math.min(100,bear));
-  let side='WAIT',score=Math.max(bull,bear);
-  if(bull>=62&&bull-bear>=16)side='BUY'; else if(bear>=62&&bear-bull>=16)side='SELL'; else reason.push('Konfluensi belum cukup → WAIT');
-  return {side,score,bull,bear,reason:reason.slice(-7),strength:score>=80?'HIGH':score>=62?'MEDIUM':'LOW',sr};
+  const gap=Math.abs(bull-bear), score=Math.max(bull,bear);
+  let side='WAIT';
+  // Do not force a direction, but avoid the previous overly-strict 62/16 gate that
+  // turned normal bullish/bearish market structure into WAIT almost all the time.
+  if(bull>=50&&bull-bear>=8)side='BUY';
+  else if(bear>=50&&bear-bull>=8)side='SELL';
+  else reason.push('Konfluensi belum cukup → WAIT');
+  return {side,score,bull,bear,gap,reason:reason.slice(-7),strength:score>=75?'HIGH':score>=60?'MEDIUM':'LOW',sr};
 }
 function aiCandleTrend(c){
   if(!c||c.length<30)return {side:'WAIT',score:0,reason:['Need at least 30 candles'],strength:'LOW'};
@@ -282,11 +288,12 @@ function projectFutureSignals(){
     // Breakout/breakdown continuation gets less weight as the horizon grows.
     if(sr.resistance&&virtual>sr.resistance)bull+=10*decay;
     if(sr.support&&virtual<sr.support)bear+=10*decay;
-    bull=Math.round(clamp(bull*decay,0,100));
-    bear=Math.round(clamp(bear*decay,0,100));
-    let side='WAIT',score=Math.max(bull,bear);
-    if(bull>=60&&bull-bear>=14)side='BUY';
-    else if(bear>=60&&bear-bull>=14)side='SELL';
+    // Decay only the forward-added conviction; keep the base candle evidence intact.
+    bull=Math.round(clamp(bull,0,100));
+    bear=Math.round(clamp(bear,0,100));
+    let side='WAIT',score=Math.max(bull,bear),gap=Math.abs(bull-bear);
+    if(bull>=50&&gap>=8)side='BUY';
+    else if(bear>=50&&gap>=8)side='SELL';
     const strength=score>=78?'HIGH':score>=60?'MEDIUM':'LOW';
     const reason=side==='BUY'
       ? (sr.support&&virtual<=sr.support+atr*.35?'support + bullish bias':h<=2?'momentum + wick/body':'bullish bias decaying')
@@ -318,6 +325,7 @@ function refreshSignalFromCurrent(){recordPredictionSignal(Date.now());renderSig
 function scheduleLivePrediction(){recordPredictionSignal(Date.now())}
 function mtf(){let tfs=['1m','5m','15m','1h','4h'];Promise.all(tfs.map(tf=>jsonFetch(`/api/klines?symbol=${S.symbol}&interval=${tf}&limit=180`).then(d=>({tf,c:(d||[]).map(x=>({o:+x[1],h:+x[2],l:+x[3],c:+x[4]}))})))).then(rows=>{S.mtf={};rows.forEach(x=>{let a=x.c.map(z=>z.c),r=RSI(a).at(-1),e20=EMA(a,20).at(-1),e50=EMA(a,50).at(-1),ad=ADX(x.c).at(-1),dir=e20>e50?'BULL':'BEAR';S.mtf[x.tf]={dir,r,ad};});render('confluence')}).catch(()=>{})}
 async function order(side){
+  if(AUTO_ENTRY!==false && !window.__manualOrderClick)return;
   if(S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0)return alert(`Masih ada posisi Binance ${Number(S.accountPosition.positionAmt)>0?'LONG':'SHORT'} ${Math.abs(Number(S.accountPosition.positionAmt)).toFixed(6)} BTC. Tutup posisi aktif dulu.`);
   const g=entryGuard(side);if(!g.ok){alert(g.reason);return}
   const z=S.smart?.[side.toLowerCase()];if(!z)return alert('SL/TP belum siap');
@@ -419,7 +427,7 @@ $('fibBtn').onclick=()=>setChartTool('fib');
 $('srBtn').onclick=()=>{const sr=detectSR(S.c.slice(0,-1));SR_STATE=sr;S.sr=[sr.support,sr.resistance].filter(Boolean);updateAnalysisUI();draw();updateAITrend();alert(`Auto S/R\nSupport: ${sr.support?fmt(sr.support):'—'}\nResistance: ${sr.resistance?fmt(sr.resistance):'—'}\nContext: ${sr.context}\n\nMode: ANALISIS SAJA — tidak ada order yang dikirim.`)};
 $('swingBtn').onclick=()=>{S.swings=swings(S.c);updateAnalysisUI();draw()};
 $('tv').onclick=()=>window.open(`https://www.tradingview.com/chart/?symbol=BINANCE:${S.symbol}.P`);
-$('long').onclick=()=>order('LONG');$('short').onclick=()=>order('SHORT');$('quickLong').onclick=()=>order('LONG');$('quickShort').onclick=()=>order('SHORT');$('reconcileDock').onclick=()=>refreshAccount();$('reconcile').onclick=()=>jsonFetch('/api/account',{headers:H()}).then(x=>{if(x.error){alert(x.error);return}let b=x.balances?.find(z=>z.asset==='USDT');$('balance').textContent=fmt(b?.balance);$('availableBalance').textContent=fmt(b?.availableBalance);$('dd').textContent=x.guard?.dd==null?'—':fmt(x.guard.dd)+'%';let p=(x.binancePositions||x.positions||[]).find(z=>z.symbol===S.symbol && Math.abs(Number(z.positionAmt||0))>0);if(p){$('upnl').textContent=fmt(p.unRealizedProfit);$('liqPrice').textContent=fmt(p.liquidationPrice)}else{$('upnl').textContent=fmt(0);$('liqPrice').textContent='—'}});
+$('long').onclick=()=>{window.__manualOrderClick=true;order('LONG').finally(()=>window.__manualOrderClick=false)};$('short').onclick=()=>{window.__manualOrderClick=true;order('SHORT').finally(()=>window.__manualOrderClick=false)};$('quickLong').onclick=()=>{window.__manualOrderClick=true;order('LONG').finally(()=>window.__manualOrderClick=false)};$('quickShort').onclick=()=>{window.__manualOrderClick=true;order('SHORT').finally(()=>window.__manualOrderClick=false)};$('reconcileDock').onclick=()=>refreshAccount();$('reconcile').onclick=()=>jsonFetch('/api/account',{headers:H()}).then(x=>{if(x.error){alert(x.error);return}let b=x.balances?.find(z=>z.asset==='USDT');$('balance').textContent=fmt(b?.balance);$('availableBalance').textContent=fmt(b?.availableBalance);$('dd').textContent=x.guard?.dd==null?'—':fmt(x.guard.dd)+'%';let p=(x.binancePositions||x.positions||[]).find(z=>z.symbol===S.symbol && Math.abs(Number(z.positionAmt||0))>0);if(p){$('upnl').textContent=fmt(p.unRealizedProfit);$('liqPrice').textContent=fmt(p.liquidationPrice)}else{$('upnl').textContent=fmt(0);$('liqPrice').textContent='—'}});
 $('kill').onclick=()=>{let on=!S.kill;if(!confirm(on?'Aktifkan KILL SWITCH?':'Matikan KILL SWITCH?'))return;jsonFetch('/api/kill-switch',{method:'POST',headers:H(),body:JSON.stringify({enabled:on,symbol:S.symbol})}).then(x=>{S.kill=x.killSwitch;$('kill').textContent=S.kill?'KILL ON':'KILL';$('mode').textContent=S.kill?'HALTED':$('mode').textContent})};
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');render(t.dataset.tab);if(t.dataset.tab==='backtest')setTimeout(()=>{let b=$('runbt');if(b)b.onclick=backtest},0)});
 document.getElementById('alog').onclick=async()=>{let x=await jsonFetch('/api/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:document.getElementById('au').value,password:document.getElementById('ap').value,code:document.getElementById('ac').value})});if(x.token){AUTH=x.token;sessionStorage.setItem('obsidian_token',AUTH);document.getElementById('authbar').style.display='none';document.getElementById('authmsg').textContent='Logged in';refreshAccount();loadCredStatus();requestAnimationFrame(()=>{resize();safeDraw()})}else document.getElementById('authmsg').textContent=x.error||'Login failed'};

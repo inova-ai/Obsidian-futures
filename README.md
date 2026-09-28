@@ -85,8 +85,15 @@ Import the ZIP/project into Vercel. No custom build command is required. Node.js
 - UI explicitly labels the separation between analysis and execution.
 
 
-## Signal Drop v5.28
+## Signal Drop v5.29
 - Realtime projection sequence up to 12 candles.
 - Time format follows WIB and uses dot separator (HH.MM WIB).
 - Projection score combines candle body/wicks, momentum, EMA bias, support/resistance proximity, and a decaying horizon weight.
 - Projection is a directional bias, not a guarantee of future price.
+
+
+## v5.29 fixes
+- Startup is read-only: page load never submits an order.
+- Live position panel explicitly shows positions detected from Binance; it does not create them.
+- Signal projection thresholds were recalibrated so normal directional confluence does not collapse into WAIT on every candle.
+- Forward decay now reduces added future conviction instead of multiplying away the underlying candle evidence.
