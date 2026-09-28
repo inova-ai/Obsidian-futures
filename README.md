@@ -58,3 +58,7 @@ If you do not have a database yet, set `MASTER_KEY` and optionally `ADMIN_USERNA
 This version pins the Node.js Function to `sin1` (Singapore) so server-side
 requests to external market-data services originate from the configured
 Singapore Function region. Redeploy after changing `vercel.json`.
+
+
+## V11 market-data fallback
+The chart first requests Binance Futures klines. If Binance rejects the Vercel function's market-data request because of IP/region restrictions, `/api/klines` automatically falls back to Bybit USDT-perpetual public klines. The fallback is chart/indicator data only; Binance account/order APIs and credentials remain separate. When Binance WebSocket is unavailable, the frontend polls `/api/klines` every 5 seconds so the chart can still update.
