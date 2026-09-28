@@ -97,3 +97,13 @@ Import the ZIP/project into Vercel. No custom build command is required. Node.js
 - Live position panel explicitly shows positions detected from Binance; it does not create them.
 - Signal projection thresholds were recalibrated so normal directional confluence does not collapse into WAIT on every candle.
 - Forward decay now reduces added future conviction instead of multiplying away the underlying candle evidence.
+
+
+## Signal Drop v5.31 — balanced per-candle projection
+- Memisahkan **trend saat ini** dari **prediksi candle berikutnya**.
+- Prediksi memakai candle closed terbaru.
+- Decision engine memakai 3 level: Strong BUY / Strong SELL / conflict-WAIT.
+- MTF dibatasi sebagai context; tidak lagi cukup untuk mempertahankan BUY/SELL beruntun.
+- Support/resistance menjadi directional override: rejection/area dekat level dapat membalik proyeksi.
+- Forecast 26 candle menggunakan projected virtual path per candle, bukan menyalin bias global.
+- Signal Drop menyimpan tepat satu hasil per candle slot dan dapat menampilkan `B`, `S`, atau `W`.
