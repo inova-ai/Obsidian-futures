@@ -1,70 +1,55 @@
-# Obsidian Futures V5.6 — Vercel Premium
+# Obsidian Futures v5.7 — Binance Demo / Realtime
 
-Vercel-native deployment of the Obsidian Futures dashboard.
+Vercel-ready Binance USDⓈ-M Futures dashboard with realtime market data, Binance Demo account balance/positions, and explicit BUY/SELL entry controls.
 
-## Architecture
-- Express app exported from `src/index.js`, the supported Vercel Express entry path.
-- Premium responsive dashboard served from `public/index.html`.
-- Binance Futures market WebSocket connects directly from the browser.
-- PostgreSQL is external/persistent via `DATABASE_URL` (Neon/Supabase/Postgres provider).
-- Live trading is disabled by default.
+## What was fixed
+- **Binance Demo is now the safe default.** `TRADING_MODE=demo` automatically uses `https://demo-fapi.binance.com` for Futures REST and `wss://demo-fstream.binance.com` for market WebSocket. Existing live `BINANCE_BASE_URL` values are ignored while in demo mode. Binance documents Demo Trading as a virtual-funds environment and confirms API access for Demo Trading.
+- **Account balance/positions no longer require PostgreSQL** when `BINANCE_API_KEY` and `BINANCE_API_SECRET` are supplied in Vercel. This fixes the common blank `Balance USDT` / `Available USDT` state caused by the old DB middleware.
+- **Realtime market WebSocket fixed.** The frontend now uses the combined `/stream?streams=...` endpoint instead of `/market/stream`.
+- **Order-book depth updates are merged** with the snapshot instead of replacing the whole book with each delta.
+- **Account refresh is 2 seconds** and depth/open-interest refresh is 3 seconds.
+- **BUY / LONG and SELL / SHORT buttons are explicit.** In `demo` mode they send exchange orders to Binance Demo; in `paper` mode they create local paper positions; in `live` mode they can send real orders only when `ENABLE_LIVE_TRADING=true`.
+- **Header shows account environment** (`BINANCE DEMO`, `BINANCE LIVE`, or `PAPER`).
+- **Kill switch works without PostgreSQL** as an in-memory safety fallback; database persistence is still used when PostgreSQL is configured.
 
-## Environment variables
-See `.env.example`.
+## Vercel environment variables — recommended Demo setup
+Set these in **Vercel → Project → Settings → Environment Variables**, then redeploy:
 
-Required for persistent database features:
-- `DATABASE_URL` (or `POSTGRES_URL`)
+```text
+TRADING_MODE=demo
+ENABLE_LIVE_TRADING=false
+BINANCE_API_KEY=YOUR_BINANCE_DEMO_API_KEY
+BINANCE_API_SECRET=YOUR_BINANCE_DEMO_API_SECRET
+MASTER_KEY=YOUR_LONG_RANDOM_SECRET
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=YOUR_LONG_ADMIN_PASSWORD
+MAX_LEVERAGE=20
+MAX_RISK_PCT=2
+MAX_DAILY_LOSS_PCT=5
+ALLOWED_SYMBOLS=BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT
+SESSION_TTL_SEC=28800
+```
 
-Required for authentication/token signing:
-- `MASTER_KEY`
+`DATABASE_URL` is optional for the realtime account/chart surface. Add PostgreSQL if you want persistent paper trades, journal, audit history, database-stored credentials, 2FA setup, and persistent settings.
 
-Vercel bootstrap login fallback:
-- `ADMIN_USERNAME` (default: `admin`)
-- `ADMIN_PASSWORD` (recommended; if omitted, `MASTER_KEY` is accepted as the bootstrap password)
+For **Demo Trading**, create the API key from Binance Demo Trading/API Management. Demo credentials are separate from live credentials. Never put a live API key into a Demo deployment.
 
-Binance Futures connection (recommended for Vercel):
-- `BINANCE_API_KEY`
-- `BINANCE_API_SECRET`
+## Trading modes
+- `TRADING_MODE=demo` → Binance Futures Demo / virtual funds. This is the recommended testing mode.
+- `TRADING_MODE=paper` → no exchange orders; local paper engine.
+- `TRADING_MODE=live` + `ENABLE_LIVE_TRADING=true` → real Binance Futures orders. Use only after testing the Demo mode.
 
-The server prefers these Vercel environment credentials and never sends them to the browser. The optional in-app credential form remains available only for database-backed deployments. Use a Binance HMAC/system-generated key for this implementation. For safety, do not enable withdrawals; grant only the Futures/read permissions required by the app.
+## Endpoints / verification
+After deployment:
+- `/api/health` — confirms `tradingMode`, Binance environment/base URL, credentials-configured flag, DB state, and kill switch.
+- `/api/runtime` — confirms the public market WebSocket endpoint used by the frontend.
+- `/api/binance/test` — after login, confirms account access, trading permission, balance and positions.
+- `/api/account` — after login, returns the current Binance Futures balance/positions.
 
-Recommended:
-- `ENABLE_LIVE_TRADING=false`
-- `BINANCE_BASE_URL=https://fapi.binance.com`
-- `MAX_LEVERAGE=20`
-- `MAX_RISK_PCT=2`
-- `MAX_DAILY_LOSS_PCT=5`
-- `ALLOWED_SYMBOLS=BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT`
-- `SESSION_TTL_SEC=28800`
+The account API is authenticated because it exposes private balance and position data.
+
+## Important
+For Binance Demo, the market/chart data may mirror live market conditions while account balances and orders are simulated. The Demo environment is separate from real funds. Keep withdrawals disabled on any live API key used with the app.
 
 ## Deploy
-Import the repository/project in Vercel. Do not set a custom build command or output directory.
-Node.js 24.x is selected through `package.json`.
-
-After deployment check:
-- `/api/health` should return JSON.
-- After login, `/api/binance/test` should report `connected: true` when Binance credentials are valid.
-- `/` should show the dashboard.
-
-If `/api/health` returns an error, inspect the Vercel Function logs before enabling any live trading.
-
-### If the screenshot says `Database initialization failed`
-The dashboard now keeps the market/chart/auth surface available even when PostgreSQL is not connected. Add `DATABASE_URL` (or `POSTGRES_URL`) in Vercel Project Settings → Environment Variables, then redeploy. Vercel environment-variable changes apply to new deployments.
-
-If you do not have a database yet, set `MASTER_KEY` and optionally `ADMIN_USERNAME`/`ADMIN_PASSWORD`; the Login screen can authenticate in environment-admin mode. Persistent journal, paper positions, credentials, kill-switch state, and settings still require PostgreSQL.
-
-
-## Vercel region
-This version pins the Node.js Function to `sin1` (Singapore) so server-side
-requests to external market-data services originate from the configured
-Singapore Function region. Redeploy after changing `vercel.json`.
-
-
-## V11 market-data fallback
-The chart first requests Binance Futures klines. If Binance rejects the Vercel function's market-data request because of IP/region restrictions, `/api/klines` automatically falls back to Bybit USDT-perpetual public klines. The fallback is chart/indicator data only; Binance account/order APIs and credentials remain separate. When Binance WebSocket is unavailable, the frontend polls `/api/klines` every 5 seconds so the chart can still update.
-
-
-## V13 chart/login fix
-- Fixes candlestick renderer crash after login/resize caused by swing indices belonging to the full 500-candle array while the renderer displays only the last 160 candles.
-- Swing markers are now mapped to the visible candle window and bounds-checked before reading `.h`/`.l`.
-- Keeps V12 market-data fallback and login resize/redraw behavior.
+Import the ZIP/project into Vercel. No custom build command is required. Node.js 24.x is specified in `package.json`. The Vercel Function region remains `sin1`.
