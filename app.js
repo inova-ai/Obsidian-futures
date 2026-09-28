@@ -31,6 +31,14 @@ const fmIDR=fmtIDR;
 const toUSDT=idr=>(+idr||0)/Math.max(1,USDT_IDR_RATE);
 const floorStep=(v,step)=>{v=Number(v);step=Number(step);if(!Number.isFinite(v)||!Number.isFinite(step)||step<=0)return 0;const d=Math.max(0,(String(step).split('.')[1]||'').length),f=10**d;return Math.floor((v*f+1e-9)/(step*f))*step};
 async function loadOrderConstraints(){try{const x=await jsonFetch(`/api/order/constraints?symbol=${encodeURIComponent(S.symbol)}`);if(x?.lotSize)ORDER_FILTERS=x.lotSize; if(x?.priceFilter?.tickSize)ORDER_FILTERS.tickSize=x.priceFilter.tickSize;}catch{}}
+async function serverOrderPreview(side){
+  const z=S.smart?.[side.toLowerCase()]; if(!z)throw Error('SL/TP belum siap');
+  const capitalIdr=+$('capital').value||0, riskPct=+$('risk').value||0, leverage=+$('lev').value||1;
+  const entryType=String($('entryType')?.value||'MARKET').toUpperCase();
+  const entryInput=entryType==='LIMIT'?Number($('entryPrice')?.value||0):Number(S.c.at(-1)?.c||0);
+  const body={symbol:S.symbol,side,entryType,entry:entryInput,entryPrice:entryInput,stopLoss:z.sl,takeProfit:$('noTp').checked?0:z.tp,capital:toUSDT(capitalIdr),riskPct,leverage,sizingMode:String($('sizingMode')?.value||'MARGIN').toUpperCase()};
+  return jsonFetch('/api/order/preview',{method:'POST',headers:H(),body:JSON.stringify(body)});
+}
 let S={symbol:'BTCUSDT',tf:'5m',c:[],view:{span:140,offset:0},ema:true,bb:false,macd:false,vwap:false,adx:false,atr:false,tool:null,lines:[],fib:null,sr:[],swings:[],drag:null,book:{bids:[],asks:[]},market:{},account:{},accountPosition:null,positions:[],mtf:{},kill:false};
 const fmt=n=>{n=+n;if(!Number.isFinite(n))return '—';return Math.abs(n)>=1000?n.toLocaleString(undefined,{maximumFractionDigits:2}):n.toFixed(Math.abs(n)<1?6:2)};
 const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
@@ -121,7 +129,7 @@ function scheduleReconnect(){if(wsRetryTimer)return;const delay=Math.min(30000,M
 async function depth(){try{let d=await jsonFetch(`/api/depth?symbol=${S.symbol}`);if(!d.error){S.book.bids=d.bids;S.book.asks=d.asks;renderBook()};let o=await jsonFetch(`/api/open-interest?symbol=${S.symbol}`);if(!o.error)$('oi').textContent=fmt(o.openInterest)}catch{}}
 function renderBook(){let b=(S.book.bids||[]).slice(0,10),a=(S.book.asks||[]).slice(0,10),sum=(z)=>z.reduce((p,x)=>p+ +x[1],0),sb=sum(b),sa=sum(a);$('bids').innerHTML=b.map(x=>`<div class="obrow"><span class="good">${fmt(+x[0])}</span><span>${fmt(+x[1])}</span></div>`).join('');$('asks').innerHTML=a.map(x=>`<div class="obrow"><span class="bad">${fmt(+x[0])}</span><span>${fmt(+x[1])}</span></div>`).join('');$('imbalance').textContent=((sb-sa)/(sb+sa||1)*100).toFixed(1)+'%'}
 function smart(){if(!S.c.length)return;let c=S.c.at(-1),at=ATR(S.c).at(-1),sw=S.swings,low=sw.lo.length?S.c[sw.lo.at(-1)].l:c.l,high=sw.hi.length?S.c[sw.hi.at(-1)].h:c.h,am=+$('atrMult').value||1.5,rr=+$('rr').value||2;let slL=Math.min(low,c.c-at*am),tpL=c.c+(c.c-slL)*rr,slS=Math.max(high,c.c+at*am),tpS=c.c-(slS-c.c)*rr;S.smart={long:{sl:slL,tp:tpL},short:{sl:slS,tp:tpS},atr:at};$('smartSL').textContent=`B ${fmtIDR(slL)} · J ${fmtIDR(slS)}`;$('smartTP').textContent=`B ${fmtIDR(tpL)} · J ${fmtIDR(tpS)}`}
-function calc(){if(!S.c.length)return;let a=S.c.map(x=>x.c),c=S.c.at(-1),m=MACD(a),at=ATR(S.c),r=RSI(a),v=VWAP(S.c),adx=ADX(S.c),sd=SMA(a,20).map((x,i)=>{let z=a.slice(Math.max(0,i-19),i+1),av=x;return Math.sqrt(z.reduce((p,q)=>p+(q-av)**2,0)/z.length)});$('macd').textContent=fmt(m.m.at(-1))+' / '+fmt(m.sig.at(-1));$('vwap').textContent=fmtIDR(v.at(-1));$('adx').textContent=fmt(adx.at(-1));$('atr').textContent=fmt(at.at(-1));$('rsi').textContent=fmt(r.at(-1));$('bbw').textContent=((4*sd.at(-1))/(SMA(a,20).at(-1)||1)*100).toFixed(2)+'%';$('riskMeter').style.width=Math.min(100,(+$('risk').value||0)/2*100)+'%';let side=$('long').dataset.side||'LONG',z=S.smart?.[side.toLowerCase()];if(z){const capitalIdr=+$('capital').value||0,lev=+$('lev').value||1,capitalUsdt=toUSDT(capitalIdr),entry=c.c,sizing=String($('sizingMode')?.value||'MARGIN').toUpperCase(),riskPct=+$('risk').value||0,riskUsdt=capitalUsdt*riskPct/100,slDist=Math.abs(entry-z.sl),marginQty=capitalUsdt*lev/entry,riskQty=slDist>0?riskUsdt/slDist:marginQty,qty=sizing==='RISK'?Math.min(riskQty,marginQty):marginQty,notionalUsdt=qty*entry,marginUsdt=notionalUsdt/lev,slLossUsdt=qty*slDist;const exchangeQty=floorStep(qty,ORDER_FILTERS.stepSize||0.001);const exchangeNotional=exchangeQty*entry;const exchangeMargin=exchangeNotional/lev;const pnl=(pct)=>exchangeNotional*pct/100; $('qty').textContent=exchangeQty.toFixed(6)+' BTC';$('riskUsd').textContent=fmtIDR(riskUsdt);if($('calcNotional'))$('calcNotional').textContent=fmtIDR(exchangeNotional);if($('calcQty'))$('calcQty').textContent=exchangeQty.toFixed(6)+' BTC';if($('calcMargin'))$('calcMargin').textContent=fmtIDR(exchangeMargin);if($('calcSlRisk'))$('calcSlRisk').textContent=fmtIDR(exchangeQty*slDist)+' '+((exchangeQty*slDist)>riskUsdt?'⚠ di atas risiko acuan':'');if($('pnl05'))$('pnl05').textContent='+ '+fmtIDR(pnl(.5));if($('pnl1'))$('pnl1').textContent='+ '+fmtIDR(pnl(1));if($('pnl2'))$('pnl2').textContent='+ '+fmtIDR(pnl(2));if($('loss05'))$('loss05').textContent='- '+fmtIDR(pnl(.5));if($('loss1'))$('loss1').textContent='- '+fmtIDR(pnl(1));if($('loss2'))$('loss2').textContent='- '+fmtIDR(pnl(2));}}
+function calc(){if(!S.c.length)return;let a=S.c.map(x=>x.c),c=S.c.at(-1),m=MACD(a),at=ATR(S.c),r=RSI(a),v=VWAP(S.c),adx=ADX(S.c),sd=SMA(a,20).map((x,i)=>{let z=a.slice(Math.max(0,i-19),i+1),av=x;return Math.sqrt(z.reduce((p,q)=>p+(q-av)**2,0)/z.length)});$('macd').textContent=fmt(m.m.at(-1))+' / '+fmt(m.sig.at(-1));$('vwap').textContent=fmtIDR(v.at(-1));$('adx').textContent=fmt(adx.at(-1));$('atr').textContent=fmt(at.at(-1));$('rsi').textContent=fmt(r.at(-1));$('bbw').textContent=((4*sd.at(-1))/(SMA(a,20).at(-1)||1)*100).toFixed(2)+'%';$('riskMeter').style.width=Math.min(100,(+$('risk').value||0)/2*100)+'%';let side=$('long').dataset.side||'LONG',z=S.smart?.[side.toLowerCase()];if(z){const capitalIdr=+$('capital').value||0,lev=+$('lev').value||1,capitalUsdt=toUSDT(capitalIdr),entry=c.c,sizing=String($('sizingMode')?.value||'MARGIN').toUpperCase(),riskPct=+$('risk').value||0,riskUsdt=capitalUsdt*riskPct/100,slDist=Math.abs(entry-z.sl),marginQty=capitalUsdt*lev/entry,riskQty=slDist>0?riskUsdt/slDist:marginQty,qty=sizing==='RISK'?Math.min(riskQty,marginQty):marginQty,notionalUsdt=qty*entry,marginUsdt=notionalUsdt/lev,slLossUsdt=qty*slDist;const exchangeQty=floorStep(qty,ORDER_FILTERS.stepSize||0.001);const exchangeNotional=exchangeQty*entry;const exchangeMargin=exchangeNotional/lev;const pnl=(pct)=>exchangeNotional*pct/100; $('qty').textContent=exchangeQty.toFixed(6)+' BTC'; if($('calcSync'))$('calcSync').textContent='Sinkron dengan filter Binance · order server menghitung ulang Qty';$('riskUsd').textContent=fmtIDR(riskUsdt);if($('calcNotional'))$('calcNotional').textContent=fmtIDR(exchangeNotional);if($('calcQty'))$('calcQty').textContent=exchangeQty.toFixed(6)+' BTC';if($('calcMargin'))$('calcMargin').textContent=fmtIDR(exchangeMargin);if($('calcSlRisk'))$('calcSlRisk').textContent=fmtIDR(exchangeQty*slDist)+' '+((exchangeQty*slDist)>riskUsdt?'⚠ di atas risiko acuan':'');if($('pnl05'))$('pnl05').textContent='+ '+fmtIDR(pnl(.5));if($('pnl1'))$('pnl1').textContent='+ '+fmtIDR(pnl(1));if($('pnl2'))$('pnl2').textContent='+ '+fmtIDR(pnl(2));if($('loss05'))$('loss05').textContent='- '+fmtIDR(pnl(.5));if($('loss1'))$('loss1').textContent='- '+fmtIDR(pnl(1));if($('loss2'))$('loss2').textContent='- '+fmtIDR(pnl(2));}}
 
 function detectSR(c){
   if(!c||c.length<40)return {support:null,resistance:null,context:'NO_LEVEL',distanceSupport:null,distanceResistance:null};
@@ -241,48 +249,46 @@ function refreshSignalFromCurrent(){recordPredictionSignal(Date.now());renderSig
 function scheduleLivePrediction(){recordPredictionSignal(Date.now())}
 function mtf(){let tfs=['1m','5m','15m','1h','4h'];Promise.all(tfs.map(tf=>jsonFetch(`/api/klines?symbol=${S.symbol}&interval=${tf}&limit=180`).then(d=>({tf,c:(d||[]).map(x=>({o:+x[1],h:+x[2],l:+x[3],c:+x[4]}))})))).then(rows=>{S.mtf={};rows.forEach(x=>{let a=x.c.map(z=>z.c),r=RSI(a).at(-1),e20=EMA(a,20).at(-1),e50=EMA(a,50).at(-1),ad=ADX(x.c).at(-1),dir=e20>e50?'BULL':'BEAR';S.mtf[x.tf]={dir,r,ad};});render('confluence')}).catch(()=>{})}
 async function order(side){
-  if(S.kill)return alert('Kill switch aktif');
-  const guard=entryGuard(side);
-  if(!guard.ok){updateEntryButtons();return alert(`ENTRY DIHENTIKAN
-
-${guard.reason}
-Arah live: ${guard.live}`)}
-  const p=S.c.at(-1)?.c,z=S.smart?.[side.toLowerCase()];
-  if(!p||!z)return alert('Data market belum siap.');
+  const g=entryGuard(side);if(!g.ok){alert(g.reason);return}
+  const z=S.smart?.[side.toLowerCase()];if(!z)return alert('SL/TP belum siap');
   const entryType=String($('entryType')?.value||'MARKET').toUpperCase();
-  const typedIDR=Number($('entryPrice')?.value||0);
-  const chosenIDR=entryType==='LIMIT'&&typedIDR>0?typedIDR:fmtIDRNumber(p);
-  const entryUSDT=entryType==='LIMIT'&&typedIDR>0?toUSDT(typedIDR):p;
-  if(entryType==='LIMIT'&&!(typedIDR>0))return alert('Mode LIMIT membutuhkan Harga Entry (IDR).');
-  const noTp=!!$('noTp')?.checked;
-  const capitalIdr=+$('capital').value||0, riskPct=+$('risk').value||0, leverage=+$('lev').value||1, sizingMode=String($('sizingMode')?.value||'MARGIN').toUpperCase();
-  const capitalUsdt=toUSDT(capitalIdr), targetNotional=capitalUsdt*Math.min(leverage,20), marginQty=targetNotional/entryUSDT, riskUsd=capitalUsdt*riskPct/100, slDist=Math.abs(entryUSDT-z.sl), riskQty=slDist>0?riskUsd/slDist:marginQty, rawQty=sizingMode==='RISK'?Math.min(riskQty,marginQty):marginQty, expectedQty=floorStep(rawQty,ORDER_FILTERS.stepSize||0.001), expectedNotional=expectedQty*entryUSDT;
-  const body={symbol:S.symbol,side,entry:entryUSDT,entryType,entryPrice:entryUSDT,stopLoss:z.sl,takeProfit:noTp?0:z.tp,capital:capitalUsdt,riskPct,leverage,sizingMode,expectedQuantity:expectedQty,expectedNotional,setup:'structure+ATR',reason:'manual',profitMode:noTp?'TANPA_BATAS':'TARGET'};
-  let rt; try{rt=await jsonFetch('/api/runtime');updateModeUI(rt)}catch(e){return alert('Runtime belum siap: '+e.message)}
-  const mode=String(rt?.tradingMode||'paper').toLowerCase();
-  const target=mode==='paper'?'/api/paper/order':'/api/live/order';
+  const chosenUSDT=entryType==='LIMIT'?Number($('entryPrice')?.value||0):Number(S.c.at(-1)?.c||0);
+  if(!(chosenUSDT>0))return alert('Harga entry belum tersedia');
+  const capitalIdr=+$('capital').value||0,riskPct=+$('risk').value||0,leverage=+$('lev').value||1,sizingMode=String($('sizingMode')?.value||'MARGIN').toUpperCase();
+  if(capitalIdr<=0)return alert('Modal harus lebih dari 0');
+  const noTp=$('noTp').checked;
+  let preview;
+  try{preview=await serverOrderPreview(side)}catch(e){
+    if(e.message==='POSITION_ALREADY_OPEN')await refreshAccount();
+    return alert(e.message);
+  }
+  const mode=(await jsonFetch('/api/runtime').catch(()=>({tradingMode:'paper'}))).tradingMode?.toLowerCase()||'paper';
   const label=mode==='demo'?'BINANCE DEMO':mode==='live'?'BINANCE LIVE':'PAPER';
-  const slIDR=fromUSDT(z.sl),tpIDR=fromUSDT(z.tp);
-  if(!confirm(`${side==='LONG'?'BUY / LONG':'SELL / SHORT'} ${S.symbol}
+  const chosenIDR=fromUSDT(preview.entryPrice),slIDR=fromUSDT(z.sl),tpIDR=fromUSDT(z.tp);
+  const confirmText=`${side==='LONG'?'BUY / LONG':'SELL / SHORT'}
 Mode harga: ${entryType}
-Entry ${fmtIDR(chosenIDR)}
+Harga acuan server: ${fmtIDR(chosenIDR)}
 SL ${fmtIDR(slIDR)}
 TP ${noTp?'TANPA BATAS':fmtIDR(tpIDR)}
 Modal ${fmtIDR(capitalIdr)}
-Leverage ${leverage}x
-Qty yang dikirim ${expectedQty.toFixed(6)} BTC
-Nilai posisi ${fmtIDR(expectedNotional)}
-Risiko acuan ${fmtIDR(capitalIdr*riskPct/100)} (${riskPct}%)
+Leverage ${preview.leverage}x
+Qty YANG AKAN DIKIRIM: ${Number(preview.finalQty).toFixed(6)} BTC
+Nilai posisi: ${fmtIDR(Number(preview.finalNotional))}
+Margin: ${fmtIDR(Number(preview.margin))}
+Sizing: ${preview.sizingMode}
 Mode: ${label}
 
-Lanjut entry?`))return;
-  const x=await jsonFetch(target,{method:'POST',headers:H(),body:JSON.stringify(body)}).catch(e=>({error:e.message}));
-  if(x.error){$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="bad">ENTRY GAGAL</b><div class="note">${x.error}</div>`;return alert(x.error)}
-  $('orderResult').style.display='block';const sz=x.sizing||{}, ap=x.actualPosition;
-  $('orderResult').innerHTML=`<b class="good">ENTRY ${side==='LONG'?'BUY / LONG':'SELL / SHORT'} TERKIRIM</b><div class="note">${entryType} · Mode ${label} · Qty dikirim <b>${Number(sz.finalQty||expectedQty).toFixed(6)} BTC</b> · Nilai posisi ${fmtIDR(Number(sz.finalNotional||expectedNotional))} · Aktual ${ap?Number(ap.quantity).toFixed(6)+' BTC / '+fmtIDR(Number(ap.notional||0)):'menunggu fill'} · Entry ${fmtIDR(chosenIDR)} · SL ${fmtIDR(slIDR)} · Target ${noTp?'TANPA BATAS':fmtIDR(tpIDR)}</div>`;
-  if(mode==='paper'&&x.position){S.positions.push(x.position);render('positions')}
-  else{await refreshAccount();}
+Lanjut entry?`;
+  if(!confirm(confirmText))return;
+  const body={symbol:S.symbol,side,entry:preview.entryPrice,entryType,entryPrice:entryType==='LIMIT'?chosenUSDT:preview.entryPrice,stopLoss:z.sl,takeProfit:noTp?0:z.tp,capital:toUSDT(capitalIdr),riskPct,leverage,sizingMode,expectedQuantity:Number(preview.finalQty),expectedNotional:Number(preview.finalNotional),setup:'structure+ATR',reason:'manual',profitMode:noTp?'TANPA_BATAS':'TARGET'};
+  const target=mode==='paper'?'/api/paper/order':'/api/live/order';
+  const x=await jsonFetch(target,{method:'POST',headers:H(),body:JSON.stringify(body)}).catch(e=>({error:e.message,code:e.code}));
+  if(x.error){$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="bad">ENTRY GAGAL</b><div class="note">${x.error}</div>`;await refreshAccount();return alert(x.error)}
+  const sz=x.sizing||{},ap=x.actualPosition;const match=x.qtyMatch!==false;
+  $('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="${match?'good':'bad'}">ENTRY ${side==='LONG'?'BUY / LONG':'SELL / SHORT'} ${match?'TERSINKRON':'PERIKSA QTY'}</b><div class="note">Server mengirim <b>${Number(sz.finalQty||preview.finalQty).toFixed(6)} BTC</b> · Nilai ${fmtIDR(Number(sz.finalNotional||preview.finalNotional))} · Binance aktual <b>${ap?Number(ap.quantity).toFixed(6):'—'} BTC</b> / ${ap?fmtIDR(Number(ap.notional||0)):'—'} · Entry ${fmtIDR(fromUSDT(Number(ap?.entryPrice||preview.entryPrice)))} · SL ${fmtIDR(slIDR)} · Target ${noTp?'TANPA BATAS':fmtIDR(tpIDR)}</div>`;
+  if(mode==='paper'&&x.position){S.positions.push(x.position);render('positions')}else{await refreshAccount()}
 }
+
 function fmtIDRNumber(usdt){return Number(usdt||0)*USDT_IDR_RATE}
 function fromUSDT(usdt){return Number(usdt||0)*USDT_IDR_RATE}
 function render(tab){let el=$('content');
@@ -302,13 +308,21 @@ $('entryGuard')?.addEventListener('change',e=>{ENTRY_GUARD=e.target.checked;upda
 async function closePosition(){
   if(!confirm(`Tutup posisi ${S.symbol} sekarang pada harga market?
 Ini akan menutup posisi yang sedang terbuka.`))return;
-  const rt=await jsonFetch('/api/runtime').catch(e=>({error:e.message})); if(rt.error)return alert(rt.error);
+  const rt=await jsonFetch('/api/runtime').catch(e=>({error:e.message}));if(rt.error)return alert(rt.error);
   const mode=String(rt.tradingMode||'paper').toLowerCase();
   const x=await jsonFetch(mode==='paper'?'/api/paper/close':'/api/live/close',{method:'POST',headers:H(),body:JSON.stringify({symbol:S.symbol})}).catch(e=>({error:e.message}));
   if(x.error){$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="bad">GAGAL MENUTUP</b><div class="note">${x.error}</div>`;return alert(x.error)}
-  const pnl=Number(x.pnl||x.realizedPnl||0);$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="${pnl>=0?'good':'bad'}">POSISI DITUTUP · ${pnl>=0?'PROFIT':'LOSS'} ${fmtIDR(fromUSDT(pnl))}</b><div class="note">Harga keluar ${x.exitPrice?fmtIDR(fromUSDT(x.exitPrice)):'market'} · Mode ${String(rt.tradingMode||'paper').toUpperCase()} · <b>LIVE POSITION: CLOSED</b></div>`;
-  // Reconcile immediately with Binance so the UI cannot keep showing the old live position.
-  S.accountPosition=null; scheduleDraw(); await refreshAccount();
+  const realized=Number(x.realizedPnl??x.pnl??0),delta=Number(x.walletDelta||0),after=Number(x.balanceAfter||0);$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="${realized>=0?'good':'bad'}">POSISI DITUTUP · ${realized>=0?'PROFIT':'LOSS'} REALIZED ${fmtIDR(fromUSDT(realized))}</b><div class="note">Harga keluar ${x.exitPrice?fmtIDR(fromUSDT(x.exitPrice)):'market'} · Saldo Binance setelah close: <b>${after?fmtIDR(fromUSDT(after)):'—'}</b> · Perubahan wallet: ${fmtIDR(fromUSDT(delta))}</div>`;
+  S.accountPosition=null;scheduleDraw();
+  for(let i=0;i<8;i++){
+    await refreshAccount();
+    if(!S.accountPosition){
+      $('orderResult').innerHTML=`<b class="${realized>=0?'good':'bad'}">CLOSED · ${realized>=0?'PROFIT':'LOSS'} REALIZED ${fmtIDR(fromUSDT(realized))}</b><div class="note">LIVE POSITION: <b>CLOSED / 0 BTC</b> · Saldo Binance: <b>${after?fmtIDR(fromUSDT(after)):'—'}</b> · Perubahan wallet: ${fmtIDR(fromUSDT(delta))}</div>`;
+      return;
+    }
+    await new Promise(resolve=>setTimeout(resolve,300));
+  }
+  $('orderResult').innerHTML+=`<div class="note bad">Binance belum melaporkan 0 BTC setelah beberapa kali sinkronisasi. Tekan SYNC untuk cek ulang.</div>`;
 }
 $('closePosition')?.addEventListener('click',closePosition);
 $('stopEntryBtn')?.addEventListener('click',()=>{MANUAL_ENTRY_STOP=true;updateEntryButtons();const b=$('stopEntryBtn');if(b){b.classList.add('active');b.textContent='⏹ ENTRY DIHENTIKAN'};if($('manualEntryStatus'))$('manualEntryStatus').textContent='Entry manual: DIHENTIKAN · posisi terbuka tetap berjalan'});

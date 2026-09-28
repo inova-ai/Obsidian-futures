@@ -1,3 +1,8 @@
+## v5.22 — Realized PNL & Balance Reconcile
+- Close endpoint waits for Binance position to reach 0, then reads realized PNL and wallet balance.
+- UI shows realized PNL, post-close balance, and wallet delta after close.
+- Account refresh continues to use Binance as the source of truth.
+
 # Obsidian Futures v5.8 — Binance Demo / Realtime
 
 Vercel-ready Binance USDⓈ-M Futures dashboard with realtime market data, Binance Demo account balance/positions, and explicit BUY/SELL entry controls.
