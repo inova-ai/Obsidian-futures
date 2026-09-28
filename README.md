@@ -62,3 +62,9 @@ Singapore Function region. Redeploy after changing `vercel.json`.
 
 ## V11 market-data fallback
 The chart first requests Binance Futures klines. If Binance rejects the Vercel function's market-data request because of IP/region restrictions, `/api/klines` automatically falls back to Bybit USDT-perpetual public klines. The fallback is chart/indicator data only; Binance account/order APIs and credentials remain separate. When Binance WebSocket is unavailable, the frontend polls `/api/klines` every 5 seconds so the chart can still update.
+
+
+## V13 chart/login fix
+- Fixes candlestick renderer crash after login/resize caused by swing indices belonging to the full 500-candle array while the renderer displays only the last 160 candles.
+- Swing markers are now mapped to the visible candle window and bounds-checked before reading `.h`/`.l`.
+- Keeps V12 market-data fallback and login resize/redraw behavior.
