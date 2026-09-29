@@ -10,15 +10,15 @@ let SIGNALS=[];
 const SIGNAL_KEY='obsidian_signal_drop_v4';
 let AUTO_ENTRY=localStorage.getItem('obsidian_auto_trade')==='1';
 let AUTO_CONFIRM_SCORE=60;
-let AUTO_CONFIRM_GAP=5;
+let AUTO_CONFIRM_GAP=4;
 let lastAutoSignalKey=localStorage.getItem('obsidian_auto_last_signal')||null;
 let LAST_ORDER_DIAGNOSTIC={at:0,html:'',keepMs:12000};
 let AUTO_COOLDOWN_UNTIL=Number(localStorage.getItem('obsidian_auto_cooldown')||0);
 let autoBusy=false;
 let AUTO_PROFIT_ARM_IDR=5000;
-let AUTO_PROFIT_GIVEBACK_PCT=10;
+let AUTO_PROFIT_GIVEBACK_PCT=25;
 let AUTO_REENTRY_SCORE=60;
-let AUTO_REENTRY_GAP=5;
+let AUTO_REENTRY_GAP=4;
 // Simple risk controls: close a losing position quickly; let profitable positions run.
 let AUTO_LOSS_CUT_IDR=700;
 let AUTO_PROTECT_COOLDOWN_MS=15000;
@@ -747,7 +747,7 @@ async function autoProfitProtect(){
     await closePosition({silent:true,auto:true});
     await refreshAccount();
     if(S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0){setAutoStatus('AUTO PROTECT: posisi belum flat, entry baru ditahan','bad');return;}
-    AUTO_COOLDOWN_UNTIL=Date.now()+tfMillis(S.tf);
+    AUTO_COOLDOWN_UNTIL=Date.now()+AUTO_PROTECT_COOLDOWN_MS;
     try{localStorage.setItem('obsidian_auto_cooldown',String(AUTO_COOLDOWN_UNTIL))}catch{}
     setAutoStatus('AUTO PROTECT: posisi ditutup untuk mengunci profit · menunggu candle berikutnya sebelum entry baru','wait');
   }catch(e){setAutoStatus(`AUTO PROTECT GAGAL: ${e.message}`,'bad');}

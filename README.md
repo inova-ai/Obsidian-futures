@@ -70,3 +70,12 @@ Replace the previous package with this ZIP. Keep the existing Binance credential
 - An order response with `executedQty` but no active position is no longer treated as a synthetic position.
 - Entry failures remain visible in the UI for 12 seconds instead of being immediately overwritten by the 1-second account refresh.
 - AUTO status explicitly reports `BINANCE POSITION TERDETEKSI` on a confirmed entry and keeps failed entries retryable when the signal remains valid.
+
+
+## v5.38.3 — Risk/Reward AUTO balance
+- AUTO confirmation gap disamakan dengan FINAL SIGNAL: minimum gap 4 (bukan 5), sehingga signal SELL/BUY tidak diam hanya karena perbedaan threshold.
+- Profit lock default diubah dari 10% menjadi 25% retrace dari profit puncak. Contoh: peak +Rp30.000 memberi ruang turun sampai sekitar +Rp22.500 sebelum proteksi menutup.
+- Setelah profit-lock menutup posisi, cooldown kembali singkat 15 detik, bukan menunggu satu candle penuh.
+- Batas rugi otomatis tetap default Rp700 dan dapat diubah dari panel.
+- `noTp` tetap aktif secara default sehingga profit tidak dipotong oleh TP tetap; profit dikelola oleh profit-lock.
+- PnL posisi dan status posisi tetap bersumber dari posisi Binance yang terdeteksi.
