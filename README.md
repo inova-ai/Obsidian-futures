@@ -79,3 +79,14 @@ Replace the previous package with this ZIP. Keep the existing Binance credential
 - Batas rugi otomatis tetap default Rp700 dan dapat diubah dari panel.
 - `noTp` tetap aktif secara default sehingga profit tidak dipotong oleh TP tetap; profit dikelola oleh profit-lock.
 - PnL posisi dan status posisi tetap bersumber dari posisi Binance yang terdeteksi.
+
+
+## v5.38.4 — Unified Realtime & Execution Sync
+- Binance Futures menjadi satu-satunya sumber market candle untuk chart/signal; fallback Bybit dihapus agar signal tidak berbeda dari exchange tempat order dieksekusi.
+- Ditambahkan Binance Futures User Data WebSocket untuk `ACCOUNT_UPDATE` dan `ORDER_TRADE_UPDATE`; posisi/order menjadi sumber realtime utama, REST hanya fallback sinkronisasi. Binance merekomendasikan User Data Stream untuk posisi/order karena update diurutkan dan REST dapat tertunda saat volatilitas.
+- User stream otomatis reconnect dan keepalive; UI menampilkan status `ACCOUNT WS · REALTIME`.
+- Entry manual dengan `ENTRY GUARD` sekarang benar-benar mengikuti signal realtime; entry berlawanan ditahan.
+- AUTO melakukan validasi signal ulang tepat sebelum order sehingga tidak membuka berdasarkan signal yang sudah basi.
+- Setelah posisi ditutup karena loss/profit-lock, kunci signal lama dibersihkan sehingga re-entry searah bisa dilakukan setelah cooldown dan konfirmasi baru.
+- Service worker/app cache dinaikkan ke v5.38.4 agar browser tidak menjalankan JavaScript lama.
+- Tidak ada sistem yang dapat menjamin profit; perubahan ini menyatukan data dan eksekusi, bukan menjamin arah pasar.
