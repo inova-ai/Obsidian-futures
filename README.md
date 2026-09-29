@@ -58,3 +58,9 @@ Replace the previous package with this ZIP. Keep the existing Binance credential
 - Profit protection remains peak/giveback based.
 - Re-entry cooldown after auto close: 15 seconds.
 - These controls are risk management only and do not guarantee profit.
+
+
+## v5.38.1 — AUTO entry recovery
+- AUTO sekarang bisa mengambil pending signal yang sudah terbentuk saat halaman baru dibuka/reload, selama signal masih berlaku untuk candle berjalan.
+- Kunci `lastAutoSignalKey` baru disimpan setelah posisi benar-benar terdeteksi di Binance. Jika order gagal/transient, AUTO mencoba lagi dengan jeda 5 detik.
+- Tidak mengubah aturan sinyal, cut loss Rp700, profit protection, atau realtime market data.

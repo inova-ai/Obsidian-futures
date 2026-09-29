@@ -22,6 +22,8 @@ let AUTO_REENTRY_GAP=5;
 let AUTO_LOSS_CUT_IDR=700;
 let AUTO_PROTECT_COOLDOWN_MS=15000;
 let AUTO_PROTECT={key:null,side:null,peak:0,armed:false,lastActionAt:0};
+let AUTO_LAST_ATTEMPT={key:null,at:0};
+let AUTO_RETRY_MS=5000;
 let autoProtectBusy=false;
 let lastSignalSlot=null,lastSignalSide=null;
 try{SIGNALS=JSON.parse(localStorage.getItem(SIGNAL_KEY)||'[]')}catch{SIGNALS=[]}
@@ -651,12 +653,12 @@ async function scheduleAutoTrade(row){
   if(Number(row.score||0)<AUTO_CONFIRM_SCORE)return;
   const gap=Number(row.gap||0);
   if(gap<AUTO_CONFIRM_GAP)return;
-  const prev=SIGNALS.find(x=>x.symbol===row.symbol&&x.tf===row.tf&&Number(x.anchorTs)===Number(row.anchorTs)-tfMillis(row.tf));
   /* One strong closed-candle signal is enough for AUTO. Do not force a second-candle wait. */
   if(lastAutoSignalKey===row.key)return;
-  if(Date.now()<AUTO_COOLDOWN_UNTIL){setAutoStatus('AUTO: jeda pengaman setelah perubahan posisi · menunggu candle berikutnya','wait');return;}
-  lastAutoSignalKey=row.key;
-  try{localStorage.setItem('obsidian_auto_last_signal',row.key)}catch{}
+  const now=Date.now();
+  if(Date.now()<AUTO_COOLDOWN_UNTIL){setAutoStatus('AUTO: jeda pengaman setelah perubahan posisi · menunggu sinyal berikutnya','wait');return;}
+  if(AUTO_LAST_ATTEMPT.key===row.key && now-AUTO_LAST_ATTEMPT.at<AUTO_RETRY_MS)return;
+  AUTO_LAST_ATTEMPT={key:row.key,at:now};
   autoBusy=true;
   try{
     await refreshAccount();
@@ -677,11 +679,31 @@ async function scheduleAutoTrade(row){
       await order(row.side,{auto:true});
       await refreshAccount();
       const actual=S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0?(Number(S.accountPosition.positionAmt)>0?'BUY':'SELL'):null;
-      setAutoStatus(actual===row.side?`AUTO AKTIF: ${actual} · skor ${row.score}/100`:'AUTO: order belum terdeteksi',actual===row.side?'good':'bad');
+      if(actual===row.side){
+        lastAutoSignalKey=row.key;
+        try{localStorage.setItem('obsidian_auto_last_signal',row.key)}catch{}
+        setAutoStatus(`AUTO AKTIF: ${actual} · skor ${row.score}/100`,'good');
+      }else{
+        setAutoStatus('AUTO: order belum terdeteksi · akan mencoba lagi','bad');
+      }
     }
   }catch(e){setAutoStatus(`AUTO GAGAL: ${e.message}`,'bad');}
   finally{autoBusy=false;}
 }
+async function autoRecoverPendingSignal(){
+  if(!AUTO_ENTRY||MANUAL_ENTRY_STOP||autoBusy||autoProtectBusy)return;
+  if(Date.now()<AUTO_COOLDOWN_UNTIL)return;
+  const tf=$('signalTf')?.value||S.tf, ms=tfMillis(tf), now=Date.now();
+  const live=S.c.at(-1);
+  const liveCandle=live && now>=Number(live.t) && now<Number(live.t)+ms;
+  const anchor=liveCandle?S.c.at(-2):live;
+  if(!anchor)return;
+  const row=SIGNALS.find(x=>x.symbol===S.symbol&&x.tf===tf&&x.status==='PENDING'&&Number(x.targetTs)===Number(anchor.t)+ms);
+  if(!row||row.side==='WAIT')return;
+  if(now<Number(row.targetTs)||now>=Number(row.targetTs)+ms)return;
+  await scheduleAutoTrade(row);
+}
+
 function resetAutoProtect(){AUTO_PROTECT={key:null,side:null,peak:0,armed:false,lastActionAt:0};}
 function currentPositionSide(){const p=S.accountPosition;if(!p||Math.abs(Number(p.positionAmt||0))<=0)return null;return Number(p.positionAmt)>0?'BUY':'SELL';}
 async function autoProfitProtect(){
@@ -867,7 +889,7 @@ document.getElementById('signalTf')?.addEventListener('change',()=>renderSignalD
 document.getElementById('clearSignals')?.addEventListener('click',()=>{if(!confirm('Hapus riwayat Signal Drop untuk pair ini?'))return;SIGNALS=SIGNALS.filter(x=>x.symbol!==S.symbol);persistSignals();renderSignalDrop()});
 renderSignalDrop();
 ensureAuth();
-Promise.all([jsonFetch('/api/health'),jsonFetch('/api/runtime')]).then(([x,rt])=>{updateModeUI(rt);S.kill=!!x.killSwitch;$('kill').textContent=S.kill?'KILL ON':'KILL'}).catch(e=>{$('conn').textContent='API ERROR';$('conn').title=e.message});render();resize();load();setTimeout(()=>{resize();safeDraw()},250);setInterval(()=>{if(marketWsConnected&&Date.now()-lastMarketWsDataAt>5000){try{wsMarket?.close()}catch{}}},2000);setInterval(updateAITrend,1500);setInterval(updateLiveSignal,500);setInterval(tickLivePositionHero,1000);setInterval(mtf,5000);setInterval(()=>{renderFutureForecast()},1000);setInterval(autoProfitProtect,1000);setInterval(scheduleLivePrediction,5000);depth();oiTimer=setInterval(depth,3000);accountTimer=setInterval(refreshAccount,1000);
+Promise.all([jsonFetch('/api/health'),jsonFetch('/api/runtime')]).then(([x,rt])=>{updateModeUI(rt);S.kill=!!x.killSwitch;$('kill').textContent=S.kill?'KILL ON':'KILL'}).catch(e=>{$('conn').textContent='API ERROR';$('conn').title=e.message});render();resize();load();setTimeout(()=>{resize();safeDraw()},250);setInterval(()=>{if(marketWsConnected&&Date.now()-lastMarketWsDataAt>5000){try{wsMarket?.close()}catch{}}},2000);setInterval(updateAITrend,1500);setInterval(updateLiveSignal,500);setInterval(tickLivePositionHero,1000);setInterval(mtf,5000);setInterval(()=>{renderFutureForecast()},1000);setInterval(autoProfitProtect,1000);setInterval(autoRecoverPendingSignal,2000);setInterval(scheduleLivePrediction,5000);depth();oiTimer=setInterval(depth,3000);accountTimer=setInterval(refreshAccount,1000);
 
 
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstallPrompt=e;const b=$('installPwa');if(b){b.style.display='inline-block';b.classList.add('pwaInstall')}});
