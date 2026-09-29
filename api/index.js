@@ -86,12 +86,23 @@ function riskCalc({entry,stopLoss,capital,riskPct,leverage,sizingMode,marginType
   const rawQty=mode==='RISK'?Math.min(riskQty,marginQty):marginQty;
   return {quantity:rawQty,notional:rawQty*E,margin:rawQty*E/L,riskUsd,estimatedLoss:rawQty*loss,leverage:L,sizingMode:mode,marginType:String(marginType||'CROSS').toUpperCase()==='ISOLATED'?'ISOLATED':'CROSS',targetNotional,capital:C,entry:E};
 }
+function stepDecimals(step){
+  const s=String(step??'');
+  if(!s||!s.includes('.'))return 0;
+  return Math.max(0,s.split('.')[1].replace(/0+$/,'').length);
+}
 function decimalFloor(value,step){
   const v=Number(value), st=Number(step);
   if(!Number.isFinite(v)||!Number.isFinite(st)||st<=0)return 0;
-  const decimals=Math.max(0,(String(st).split('.')[1]||'').length);
+  const decimals=stepDecimals(st);
   const factor=10**decimals;
-  return Math.floor((v*factor+1e-9)/(st*factor))*st;
+  const units=Math.floor((v*factor+1e-9)/(st*factor));
+  return Number((units*st).toFixed(decimals));
+}
+function decimalString(value,step){
+  const decimals=stepDecimals(step);
+  const n=Number(value);
+  return Number.isFinite(n)?n.toFixed(decimals):'';
 }
 function filterOrderQty(rawQty,lot){
   const step=Number(lot?.stepSize||'0.001'), minQty=Number(lot?.minQty||'0'), maxQty=Number(lot?.maxQty||'Infinity');
@@ -214,7 +225,7 @@ app.post('/api/live/close',auth,async(qr,r)=>{try{
   const step=+(lot?.stepSize||'0.001'),q=decimalFloor(qty,step); if(q<=0)throw Error('Quantity posisi tidak valid.');
   const closeStarted=Date.now()-2000;
   const [algoCancel,regularCancel]=await Promise.all([cancelSymbolAlgoOrders(s),cancelSymbolRegularOrders(s)]);
-  const out=await binance('/fapi/v1/order',{symbol:s,side,type:'MARKET',quantity:q,reduceOnly:'true',newOrderRespType:'RESULT'},'POST',true);
+  const out=await binance('/fapi/v1/order',{symbol:s,side,type:'MARKET',quantity:decimalString(q,step),reduceOnly:'true',newOrderRespType:'RESULT'},'POST',true);
   let finalPos=null,afterBal=null,income=[];
   for(let i=0;i<16;i++){
     await new Promise(resolve=>setTimeout(resolve,250));
@@ -255,6 +266,8 @@ app.post('/api/live/order',auth,async(qr,r)=>{try{
   const {meta,lot,price,notional}=await getSymbolMeta(s);
   const tick=Number(price?.tickSize||'0.01');
   const roundPrice=(v,st)=>decimalFloor(Number(v),Number(st));
+  const priceText=(v)=>decimalString(v,tick);
+  const qtyText=(v)=>decimalString(v,Number(lot?.stepSize||'0.001'));
   const qty=filterOrderQty(rc.quantity,lot);
   const roundedEntry=roundPrice(effectiveEntry,tick);
   const stop=roundPrice(+b.stopLoss,tick),take=roundPrice(+b.takeProfit,tick);
@@ -269,17 +282,18 @@ app.post('/api/live/order',auth,async(qr,r)=>{try{
   }
   const sizingCheck={requestedQty,requestedNotional,serverEntry:effectiveEntry,serverQty:rc.quantity,serverNotional:rc.notional,finalQty:qty,finalNotional,margin,leverage:rc.leverage,capital:rc.capital,sizingMode:rc.sizingMode,stepSize:Number(lot?.stepSize||0.001),minQty:Number(lot?.minQty||0),maxQty:Number(lot?.maxQty||0)};
   const clientOrderId=`OBS-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
-  const entryPayload={symbol:s,side,quantity:qty,newClientOrderId:clientOrderId,newOrderRespType:'RESULT',type:entryType};
+  const entryPayload={symbol:s,side,quantity:qtyText(qty),newClientOrderId:clientOrderId,newOrderRespType:'RESULT',type:entryType};
   if(entryType==='LIMIT'){
     const ep=roundPrice(+b.entryPrice,tick);if(!(ep>0))throw Error('Harga LIMIT wajib diisi');
-    entryPayload.price=ep;entryPayload.timeInForce='GTC';
+    entryPayload.price=priceText(ep);entryPayload.timeInForce='GTC';
   }
-  const entry=await binance('/fapi/v1/order',entryPayload,'POST',true);
+  let entry;
+  try{entry=await binance('/fapi/v1/order',entryPayload,'POST',true)}catch(e){throw Object.assign(new Error(`ENTRY BINANCE DITOLAK: ${e.message} · Qty ${entryPayload.quantity} · ${entryType==='LIMIT'?`Price ${entryPayload.price}`:'MARKET'}`),{code:'ENTRY_EXCHANGE_ERROR'})}
   const exit=side==='BUY'?'SELL':'BUY';
   let sl=null,tp=null;
   try{
-    sl=await binance('/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol:s,side:exit,type:'STOP_MARKET',triggerPrice:stop,closePosition:'true',workingType:'MARK_PRICE'},'POST',true);
-    tp=take>0?await binance('/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol:s,side:exit,type:'TAKE_PROFIT_MARKET',triggerPrice:take,closePosition:'true',workingType:'MARK_PRICE'},'POST',true):null;
+    sl=await binance('/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol:s,side:exit,type:'STOP_MARKET',triggerPrice:priceText(stop),closePosition:'true',workingType:'MARK_PRICE'},'POST',true);
+    tp=take>0?await binance('/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol:s,side:exit,type:'TAKE_PROFIT_MARKET',triggerPrice:priceText(take),closePosition:'true',workingType:'MARK_PRICE'},'POST',true):null;
   }catch(protectionError){
     try{await cancelSymbolAlgoOrders(s)}catch{}
     try{await cancelSymbolRegularOrders(s)}catch{}
@@ -319,7 +333,7 @@ app.post('/api/live/order',auth,async(qr,r)=>{try{
     try{await cancelSymbolAlgoOrders(s)}catch{}
     try{await cancelSymbolRegularOrders(s)}catch{}
     if(actualQty>0){
-      try{await binance('/fapi/v1/order',{symbol:s,side:side==='BUY'?'SELL':'BUY',type:'MARKET',quantity:filterOrderQty(actualQty,lot),reduceOnly:'true',newOrderRespType:'RESULT'},'POST',true)}catch{}
+      try{await binance('/fapi/v1/order',{symbol:s,side:side==='BUY'?'SELL':'BUY',type:'MARKET',quantity:decimalString(filterOrderQty(actualQty,lot),Number(lot?.stepSize||'0.001')),reduceOnly:'true',newOrderRespType:'RESULT'},'POST',true)}catch{}
     }
     throw Object.assign(new Error(`Qty Binance tidak cocok. Diminta ${qty.toFixed(6)} BTC, aktual ${actualQty.toFixed(6)} BTC. Posisi yang berbeda otomatis dibatalkan/ditutup agar tidak ada risiko sizing tak sengaja.`),{code:'ACTUAL_QTY_MISMATCH'});
   }
