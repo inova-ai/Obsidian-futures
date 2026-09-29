@@ -25,3 +25,11 @@ Replace the previous package with this ZIP. Keep the existing Binance credential
 - Signal Drop now visibly shows CLOSE time -> NEXT candle time, score, strength, and evaluation result.
 - Historical predictions remain frozen and are evaluated only after the target candle closes.
 - This does not guarantee prediction accuracy or profit.
+
+## Auto-trade direction fix
+
+- Normalizes model signals (`BUY`/`SELL`) into exchange position directions (`LONG`/`SHORT`) before preview and order submission. This fixes the previous direction inversion where an automatic BUY signal could be sent as a SHORT order.
+- Position comparisons now use the same BUY/SELL signal convention, so an existing same-direction position is recognized.
+- Automatic entry errors and failed close confirmations are propagated to the auto-trade status instead of being reported as a successful/unclear action.
+- Auto trade is still browser-driven and uses this device's localStorage setting. Keep the dashboard open and authenticated; it is not a persistent server-side trading worker on Vercel. Closing/suspending the tab stops automatic monitoring. For unattended trading, a separately deployed persistent worker/scheduler with server-side safeguards is required.
+- Trading signals are probabilistic and cannot guarantee profit. Test in Binance Demo Futures before enabling live trading.

@@ -630,7 +630,7 @@ async function scheduleAutoTrade(row){
   autoBusy=true;
   try{
     await refreshAccount();
-    const p=S.accountPosition, current=p&&Math.abs(Number(p.positionAmt||0))>0?(Number(p.positionAmt)>0?'LONG':'SHORT'):null;
+    const p=S.accountPosition, current=p&&Math.abs(Number(p.positionAmt||0))>0?(Number(p.positionAmt)>0?'BUY':'SELL'):null;
     if(current===row.side){setAutoStatus(`AUTO: posisi ${row.side} tetap berjalan · sinyal ${row.score}/100`,'good');return;}
     if(current&&current!==row.side){setAutoStatus(`AUTO: sinyal ${row.side} · menutup ${current}…`,'wait');
       await closePosition({silent:true,auto:true});
@@ -641,8 +641,8 @@ async function scheduleAutoTrade(row){
       setAutoStatus(`AUTO: membuka ${row.side} · skor ${row.score}/100…`,'wait');
       await order(row.side,{auto:true});
       await refreshAccount();
-      const actual=S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0?(Number(S.accountPosition.positionAmt)>0?'LONG':'SHORT'):null;
-      setAutoStatus(actual===row.side?`AUTO AKTIF: ${actual} · skor ${row.score}/100`:'AUTO: order belum terdeteksi','good');
+      const actual=S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0?(Number(S.accountPosition.positionAmt)>0?'BUY':'SELL'):null;
+      setAutoStatus(actual===row.side?`AUTO AKTIF: ${actual} · skor ${row.score}/100`:'AUTO: order belum terdeteksi',actual===row.side?'good':'bad');
     }
   }catch(e){setAutoStatus(`AUTO GAGAL: ${e.message}`,'bad');}
   finally{autoBusy=false;}
@@ -684,7 +684,7 @@ async function autoProfitProtect(){
       await order(next.side,{auto:true});
       await refreshAccount();
       const actual=currentPositionSide();
-      setAutoStatus(actual===next.side?`AUTO AKTIF: ${actual} · re-entry terkonfirmasi Binance`:'AUTO RE-ENTRY: order belum terdeteksi','good');
+      setAutoStatus(actual===next.side?`AUTO AKTIF: ${actual} · re-entry terkonfirmasi Binance`:'AUTO RE-ENTRY: order belum terdeteksi',actual===next.side?'good':'bad');
     }else{
       setAutoStatus(`AUTO PROTECT: posisi ditutup · re-entry menunggu sinyal kuat (${next.side} ${next.score||0}/100)`, 'wait');
     }
@@ -696,7 +696,9 @@ function refreshSignalFromCurrent(){recordPredictionSignal()}
 function scheduleLivePrediction(){/* Frozen Signal Drop: no realtime rewriting. */}
 let mtfBusy=false;
 async function mtf(){if(mtfBusy)return;mtfBusy=true;try{let tfs=['1m','5m','15m','1h','4h'];const rows=await Promise.all(tfs.map(tf=>jsonFetch(`/api/klines?symbol=${S.symbol}&interval=${tf}&limit=180`).then(d=>({tf,c:(d||[]).map(x=>({o:+x[1],h:+x[2],l:+x[3],c:+x[4]}))}))));S.mtf={};rows.forEach(x=>{let a=x.c.map(z=>z.c),r=RSI(a).at(-1),e20=EMA(a,20).at(-1),e50=EMA(a,50).at(-1),ad=ADX(x.c).at(-1),dir=e20>e50?'BULL':'BEAR';S.mtf[x.tf]={dir,r,ad};});updateAITrend();if(document.querySelector('.tab.active')?.dataset.tab==='confluence')render('confluence');}catch{}finally{mtfBusy=false}}
+function normalizePositionSide(side){const v=String(side||'').toUpperCase();if(v==='BUY'||v==='LONG')return 'LONG';if(v==='SELL'||v==='SHORT')return 'SHORT';throw Error(`Arah order tidak valid: ${side}`)}
 async function order(side,opts={}){
+  side=normalizePositionSide(side);
   const isAuto=!!opts.auto;
   if(isAuto&&!AUTO_ENTRY)return;
   if(!isAuto&&!window.__manualOrderClick&&AUTO_ENTRY===true)return;
@@ -735,7 +737,7 @@ Lanjut entry?`;
   const body={symbol:S.symbol,side,entry:preview.entryPrice,entryType,entryPrice:entryType==='LIMIT'?chosenUSDT:preview.entryPrice,stopLoss:z.sl,takeProfit:noTp?0:z.tp,capital:toUSDT(capitalIdr),riskPct,leverage,marginType:String($('margin')?.value||'Cross').toUpperCase(),sizingMode,expectedQuantity:Number(preview.finalQty),expectedNotional:Number(preview.finalNotional),setup:'structure+ATR',reason:isAuto?'ai-auto':'manual',profitMode:noTp?'TANPA_BATAS':'TARGET'};
   const target=mode==='paper'?'/api/paper/order':'/api/live/order';
   const x=await jsonFetch(target,{method:'POST',headers:H(),body:JSON.stringify(body)}).catch(e=>({error:e.message,code:e.code}));
-  if(x.error){$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="bad">ENTRY GAGAL</b><div class="note">${x.error}</div>`;await refreshAccount();return alert(x.error)}
+  if(x.error){$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="bad">ENTRY GAGAL</b><div class="note">${x.error}</div>`;await refreshAccount();if(isAuto)throw Error(x.error);return alert(x.error)}
   const sz=x.sizing||{},ap=x.actualPosition;const match=x.qtyMatch!==false;
   $('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="${match?'good':'bad'}">ENTRY ${side==='LONG'?'BUY / LONG':'SELL / SHORT'} ${match?'TERSINKRON':'PERIKSA QTY'}</b><div class="note">Target server <b>${Number(sz.finalQty||preview.finalQty).toFixed(6)} BTC</b> · Notional target <b>${fmtIDR(Number(sz.finalNotional||preview.finalNotional))}</b> · Binance aktual <b>${ap?Number(ap.quantity).toFixed(6):'—'} BTC</b> / ${ap?fmtIDR(Number(ap.notional||0)):'—'} · Entry ${fmtIDR(Number(ap?.entryPrice||preview.entryPrice))} · SL ${fmtIDR(slIDR)} · Target ${noTp?'TANPA BATAS':fmtIDR(tpIDR)}</div><div class="note good">Rp300.000 × 20× hanya menjadi ±Rp6.000.000 jika Qty aktual Binance memang sesuai target. UI memakai Qty Binance sebagai sumber kebenaran.</div>`;
   if(mode==='paper'&&x.position){S.positions.push(x.position);render('positions')}else{await refreshAccount()}
@@ -757,7 +759,7 @@ cv.addEventListener('pointerdown',e=>{let r=cv.getBoundingClientRect(),x=e.clien
 cv.addEventListener('pointermove',e=>{if(!S.drag)return;let r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top,{a,dx,py}=priceMap(),i=clamp(Math.round((x-45)/dx),0,a.length-1);if(S.drag.type==='trend'){S.drag.x2=x;S.drag.y2=y}else S.drag.b=a[i]?.c||S.drag.b;draw()});
 cv.addEventListener('pointerup',()=>{S.drag=null});
 $('entryGuard')?.addEventListener('change',e=>{ENTRY_GUARD=e.target.checked;updateEntryButtons()});
-function syncAutoTradeUI(){const b=$('autoTradeBtn');if(b){b.textContent=AUTO_ENTRY?'AUTO: ON':'AUTO: OFF';b.className='btn '+(AUTO_ENTRY?'long':'');b.setAttribute('aria-pressed',AUTO_ENTRY?'true':'false');}setAutoStatus(AUTO_ENTRY?'AUTO TRADE AKTIF · entry + profit lock + reverse otomatis':'AUTO TRADE MATI · order hanya manual',AUTO_ENTRY?'good':'wait');}
+function syncAutoTradeUI(){const b=$('autoTradeBtn');if(b){b.textContent=AUTO_ENTRY?'AUTO: ON':'AUTO: OFF';b.className='btn '+(AUTO_ENTRY?'long':'');b.setAttribute('aria-pressed',AUTO_ENTRY?'true':'false');}setAutoStatus(AUTO_ENTRY?'AUTO AKTIF · entry + proteksi berjalan selama dashboard terbuka':'AUTO TRADE MATI · order hanya manual',AUTO_ENTRY?'good':'wait');}
 $('autoTradeBtn')?.addEventListener('click',()=>{AUTO_ENTRY=!AUTO_ENTRY;localStorage.setItem('obsidian_auto_trade',AUTO_ENTRY?'1':'0');syncAutoTradeUI();updateEntryButtons()});
 $('autoProfitArm')?.addEventListener('input',e=>{AUTO_PROFIT_ARM_IDR=Math.max(0,Number(e.target.value)||0)});
 $('autoProfitGiveback')?.addEventListener('input',e=>{AUTO_PROFIT_GIVEBACK_PCT=Math.min(90,Math.max(5,Number(e.target.value)||35))});
@@ -768,7 +770,7 @@ async function closePosition(opts={}){
   const rt=await jsonFetch('/api/runtime').catch(e=>({error:e.message}));if(rt.error)return alert(rt.error);
   const mode=String(rt.tradingMode||'paper').toLowerCase();
   const x=await jsonFetch(mode==='paper'?'/api/paper/close':'/api/live/close',{method:'POST',headers:H(),body:JSON.stringify({symbol:S.symbol})}).catch(e=>({error:e.message}));
-  if(x.error){$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="bad">GAGAL MENUTUP</b><div class="note">${x.error}</div>`;return alert(x.error)}
+  if(x.error){$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="bad">GAGAL MENUTUP</b><div class="note">${x.error}</div>`;if(opts.auto)throw Error(x.error);return alert(x.error)}
   const realized=Number(x.realizedPnl??x.pnl??0),delta=Number(x.walletDelta||0),after=Number(x.balanceAfter||0);$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="${realized>=0?'good':'bad'}">POSISI DITUTUP · ${realized>=0?'PROFIT':'LOSS'} REALIZED ${fmtIDR(realized)}</b><div class="note">Harga keluar ${x.exitPrice?fmtIDR(Number(x.exitPrice||0)):'market'} · Saldo Binance setelah close: <b>${Number.isFinite(after)?fmtIDR(after):'—'}</b> · Perubahan wallet: ${fmtIDR(delta)}</div>`;
   S.accountPosition=null;scheduleDraw();
   for(let i=0;i<8;i++){
@@ -780,6 +782,8 @@ async function closePosition(opts={}){
     await new Promise(resolve=>setTimeout(resolve,300));
   }
   $('orderResult').innerHTML+=`<div class="note bad">Binance belum melaporkan 0 BTC setelah beberapa kali sinkronisasi. Tekan SYNC untuk cek ulang.</div>`;
+  if(opts.auto)throw Error('Posisi belum terkonfirmasi tertutup oleh Binance; entry berikutnya dibatalkan.');
+  return x;
 }
 $('closePosition')?.addEventListener('click',closePosition);
 $('stopEntryBtn')?.addEventListener('click',()=>{MANUAL_ENTRY_STOP=true;updateEntryButtons();const b=$('stopEntryBtn');if(b){b.classList.add('active');b.textContent='⏹ ENTRY DIHENTIKAN'};if($('manualEntryStatus'))$('manualEntryStatus').textContent='Entry manual: DIHENTIKAN · posisi terbuka tetap berjalan'});
