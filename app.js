@@ -8,7 +8,11 @@ let AI_TREND={side:'WAIT',score:0,reason:[],lastNotified:null,sr:null};
 let SR_STATE={support:null,resistance:null,context:'NO_LEVEL',distanceSupport:null,distanceResistance:null};
 let SIGNALS=[];
 const SIGNAL_KEY='obsidian_signal_drop_v3';
-const AUTO_ENTRY=false; // Startup is read-only: never place an order automatically.
+let AUTO_ENTRY=localStorage.getItem('obsidian_auto_trade')==='1';
+let AUTO_CONFIRM_SCORE=70;
+let AUTO_CONFIRM_GAP=10;
+let lastAutoSignalKey=null;
+let autoBusy=false;
 let lastSignalSlot=null,lastSignalSide=null;
 try{SIGNALS=JSON.parse(localStorage.getItem(SIGNAL_KEY)||'[]')}catch{SIGNALS=[]}
 let ws=null,oiTimer=null,pollTimer=null,accountTimer=null,livePollTimer=null,clockTimer=null;
@@ -144,9 +148,12 @@ function hybridPredictiveCandle(closed, live){
   const gap=Math.abs(bull-bear),score=Math.max(bull,bear);
   let side='WAIT';
   const twoSidedConflict = bull>=48 && bear>=48 && gap<5;
-  if(!twoSidedConflict && bull>=50&&gap>=4)side='BUY';
-  else if(!twoSidedConflict && bear>=50&&gap>=4)side='SELL';
-  else reason.push(twoSidedConflict?'Realtime conflict → WAIT':'Skor di bawah threshold 50 atau gap < 4 → WAIT');
+  // Realtime confirmation uses the same quality gate as the frozen Signal Drop.
+  const strongBull = bull>=62 && gap>=8;
+  const strongBear = bear>=62 && gap>=8;
+  if(!twoSidedConflict && strongBull)side='BUY';
+  else if(!twoSidedConflict && strongBear)side='SELL';
+  else reason.push(twoSidedConflict?'Realtime conflict → WAIT':'Realtime belum cukup kuat: skor ≥62 dan gap ≥8 diperlukan → WAIT');
   return {...base,side,score,bull,bear,gap,reason:reason.slice(-8),strength:score>=78?'HIGH':score>=62?'MEDIUM':'LOW'};
 }
 function updateLiveSignal(){if(!S.c.length)return;const c=S.c.at(-1),closed=S.c.length>1?S.c.slice(0,-1):S.c,t=hybridPredictiveCandle(closed,c);const dir=c.c>c.o?'NAIK · B':c.c<c.o?'TURUN · S':'DATAR';const box=$('liveSignalBox'),sig=$('liveEntrySignal'),score=$('liveSignalScore'),cd=$('candleCountdown'),ct=$('candleTime'),clock=$('liveClock'),cdir=$('liveCandleDirection'),cprice=$('liveCandlePrice'),ls=$('signalLiveSide'),lm=$('signalLiveMeta');if(sig){sig.textContent=t.side==='BUY'?'B':t.side==='SELL'?'S':'WAIT';sig.className='signal '+(t.side==='BUY'?'good':t.side==='SELL'?'bad':'wait')}if(score)score.textContent=`${t.score||0}/100 · ${t.strength||'LOW'} · ${t.reason?.[0]||'Membaca sumbu dan momentum'}`;if(box)box.className='liveBox '+(t.side==='BUY'?'signalBuy':t.side==='SELL'?'signalSell':'signalWait');if(cdir){cdir.textContent=dir;cdir.className=''+(dir.startsWith('NAIK')?'good':dir.startsWith('TURUN')?'bad':'wait')}if(cprice)cprice.textContent=`${fmtIDR(c.c)} · Buka ${fmtIDR(c.o)}`;const ms=tfMillis(S.tf),remain=Math.max(0,(c.t+ms)-Date.now()),sec=Math.floor(remain/1000),mm=String(Math.floor(sec/60)).padStart(2,'0'),ss=String(sec%60).padStart(2,'0');if(cd)cd.textContent=`${mm}:${ss}`;if(ct)ct.textContent=`Candle ${new Date(c.t).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})}–${new Date(c.t+ms).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})} WIB`;if(clock)clock.textContent=new Date().toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit',second:'2-digit'});if(ls){ls.textContent=t.side==='BUY'?'B ↑':t.side==='SELL'?'S ↓':'WAIT •';ls.className='signalSide '+(t.side==='BUY'?'good':t.side==='SELL'?'bad':'wait')}if(lm)lm.textContent=`${t.score||0}/100 · ${dir} · close ${mm}:${ss}`;AI_TREND=t; updateEntryButtons()}
@@ -261,12 +268,17 @@ function predictiveCandle(c){
   // If both sides have meaningful evidence and are close, keep WAIT.
   let side='WAIT';
   const twoSidedConflict = bull>=48 && bear>=48 && gap<5;
-  // Anti-stuck threshold: a clear leader at 50+ with a small directional
-  // edge is enough to emit BUY/SELL. WAIT is reserved for genuinely balanced
-  // evidence rather than every imperfect indicator combination.
-  if(!twoSidedConflict && bull>=50 && gap>=4)side='BUY';
-  else if(!twoSidedConflict && bear>=50 && gap>=4)side='SELL';
-  else reason.push(twoSidedConflict?'Konflik bullish/bearish → WAIT':'Skor di bawah threshold 50 atau gap < 4 → WAIT');
+  // Quality gate: a directional label is not an entry signal unless the
+  // evidence is strong enough. This prevents LOW-confidence BUY/SELL calls
+  // such as 53/100 when the higher timeframes and momentum disagree.
+  const mtfConflictBull = mtfBear > mtfBull + 5;
+  const mtfConflictBear = mtfBull > mtfBear + 5;
+  const strongBull = bull >= 62 && gap >= 8 && !mtfConflictBull;
+  const strongBear = bear >= 62 && gap >= 8 && !mtfConflictBear;
+  if(!twoSidedConflict && strongBull)side='BUY';
+  else if(!twoSidedConflict && strongBear)side='SELL';
+  else reason.push(twoSidedConflict?'Konflik bullish/bearish → WAIT':
+    (mtfConflictBull||mtfConflictBear)?'MTF berlawanan terlalu kuat → WAIT':'Belum cukup kuat: perlu skor ≥62 dan gap ≥8 → WAIT');
 
   return {
     side,score,bull,bear,gap,mtfBull,mtfBear,
@@ -511,7 +523,7 @@ function freezeNextCandlePrediction(anchor){
   const key=`${S.symbol}:${tf}:${targetTs}`;
   const row={
     key,ts:Number(anchor.t),anchorTs:Number(anchor.t),targetTs,symbol:S.symbol,tf,
-    side:t.side,score:t.score,strength:t.strength,reason:t.reason,
+    side:t.side,score:t.score,gap:Number(t.gap||0),strength:t.strength,reason:t.reason,
     context:t.sr?.context||'NO_LEVEL',support:t.sr?.support,resistance:t.sr?.resistance,
     predictedAt:`Dibekukan saat close ${signalTime(anchor.t)}`,
     status:'PENDING',outcome:null,actual:null,actualOpen:null,actualClose:null,actualMovePct:null
@@ -544,14 +556,48 @@ function recordPredictionSignal(){
 function recordClosedSignal(c){
   if(!c)return;
   evaluateClosedCandle(c);
-  freezeNextCandlePrediction(c);
+  const row=freezeNextCandlePrediction(c);
   renderSignalDrop();
+  if(row) scheduleAutoTrade(row);
 }
+async function scheduleAutoTrade(row){
+  if(!AUTO_ENTRY||MANUAL_ENTRY_STOP||autoBusy||!row)return;
+  if(row.side==='WAIT')return;
+  if(Number(row.score||0)<AUTO_CONFIRM_SCORE)return;
+  const gap=Number(row.gap||0);
+  if(gap<AUTO_CONFIRM_GAP)return;
+  const prev=SIGNALS.find(x=>x.symbol===row.symbol&&x.tf===row.tf&&Number(x.anchorTs)===Number(row.anchorTs)-tfMillis(row.tf));
+  if(!prev||prev.side!==row.side||Number(prev.score||0)<AUTO_CONFIRM_SCORE||Number(prev.gap||0)<AUTO_CONFIRM_GAP){setAutoStatus(`AUTO: ${row.side} belum terkonfirmasi 2 candle · tunggu`, 'wait');return;}
+  if(lastAutoSignalKey===row.key)return;
+  lastAutoSignalKey=row.key;
+  autoBusy=true;
+  try{
+    await refreshAccount();
+    const p=S.accountPosition, current=p&&Math.abs(Number(p.positionAmt||0))>0?(Number(p.positionAmt)>0?'LONG':'SHORT'):null;
+    if(current===row.side){setAutoStatus(`AUTO: posisi ${row.side} tetap berjalan · sinyal ${row.score}/100`,'good');return;}
+    if(current&&current!==row.side){setAutoStatus(`AUTO: sinyal ${row.side} · menutup ${current}…`,'wait');
+      await closePosition({silent:true,auto:true});
+      await new Promise(r=>setTimeout(r,700));
+      await refreshAccount();
+    }
+    if(!S.accountPosition||Math.abs(Number(S.accountPosition.positionAmt||0))===0){
+      setAutoStatus(`AUTO: membuka ${row.side} · skor ${row.score}/100…`,'wait');
+      await order(row.side,{auto:true});
+      await refreshAccount();
+      const actual=S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0?(Number(S.accountPosition.positionAmt)>0?'LONG':'SHORT'):null;
+      setAutoStatus(actual===row.side?`AUTO AKTIF: ${actual} · skor ${row.score}/100`:'AUTO: order belum terdeteksi','good');
+    }
+  }catch(e){setAutoStatus(`AUTO GAGAL: ${e.message}`,'bad');}
+  finally{autoBusy=false;}
+}
+function setAutoStatus(msg,cls='wait'){const el=$('autoTradeStatus');if(el){el.textContent=msg;el.className='note '+cls;}}
 function refreshSignalFromCurrent(){recordPredictionSignal()}
 function scheduleLivePrediction(){/* Frozen Signal Drop: no realtime rewriting. */}
 function mtf(){let tfs=['1m','5m','15m','1h','4h'];Promise.all(tfs.map(tf=>jsonFetch(`/api/klines?symbol=${S.symbol}&interval=${tf}&limit=180`).then(d=>({tf,c:(d||[]).map(x=>({o:+x[1],h:+x[2],l:+x[3],c:+x[4]}))})))).then(rows=>{S.mtf={};rows.forEach(x=>{let a=x.c.map(z=>z.c),r=RSI(a).at(-1),e20=EMA(a,20).at(-1),e50=EMA(a,50).at(-1),ad=ADX(x.c).at(-1),dir=e20>e50?'BULL':'BEAR';S.mtf[x.tf]={dir,r,ad};});render('confluence')}).catch(()=>{})}
-async function order(side){
-  if(AUTO_ENTRY!==false && !window.__manualOrderClick)return;
+async function order(side,opts={}){
+  const isAuto=!!opts.auto;
+  if(isAuto&&!AUTO_ENTRY)return;
+  if(!isAuto&&!window.__manualOrderClick&&AUTO_ENTRY===true)return;
   if(S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0)return alert(`Masih ada posisi Binance ${Number(S.accountPosition.positionAmt)>0?'LONG':'SHORT'} ${Math.abs(Number(S.accountPosition.positionAmt)).toFixed(6)} BTC. Tutup posisi aktif dulu.`);
   const g=entryGuard(side);if(!g.ok){alert(g.reason);return}
   const z=S.smart?.[side.toLowerCase()];if(!z)return alert('SL/TP belum siap');
@@ -583,8 +629,8 @@ Sizing: ${preview.sizingMode}
 Mode: ${label}
 
 Lanjut entry?`;
-  if(!confirm(confirmText))return;
-  const body={symbol:S.symbol,side,entry:preview.entryPrice,entryType,entryPrice:entryType==='LIMIT'?chosenUSDT:preview.entryPrice,stopLoss:z.sl,takeProfit:noTp?0:z.tp,capital:toUSDT(capitalIdr),riskPct,leverage,marginType:String($('margin')?.value||'Cross').toUpperCase(),sizingMode,expectedQuantity:Number(preview.finalQty),expectedNotional:Number(preview.finalNotional),setup:'structure+ATR',reason:'manual',profitMode:noTp?'TANPA_BATAS':'TARGET'};
+  if(!isAuto&&!confirm(confirmText))return;
+  const body={symbol:S.symbol,side,entry:preview.entryPrice,entryType,entryPrice:entryType==='LIMIT'?chosenUSDT:preview.entryPrice,stopLoss:z.sl,takeProfit:noTp?0:z.tp,capital:toUSDT(capitalIdr),riskPct,leverage,marginType:String($('margin')?.value||'Cross').toUpperCase(),sizingMode,expectedQuantity:Number(preview.finalQty),expectedNotional:Number(preview.finalNotional),setup:'structure+ATR',reason:isAuto?'ai-auto':'manual',profitMode:noTp?'TANPA_BATAS':'TARGET'};
   const target=mode==='paper'?'/api/paper/order':'/api/live/order';
   const x=await jsonFetch(target,{method:'POST',headers:H(),body:JSON.stringify(body)}).catch(e=>({error:e.message,code:e.code}));
   if(x.error){$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="bad">ENTRY GAGAL</b><div class="note">${x.error}</div>`;await refreshAccount();return alert(x.error)}
@@ -609,9 +655,10 @@ cv.addEventListener('pointerdown',e=>{let r=cv.getBoundingClientRect(),x=e.clien
 cv.addEventListener('pointermove',e=>{if(!S.drag)return;let r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top,{a,dx,py}=priceMap(),i=clamp(Math.round((x-45)/dx),0,a.length-1);if(S.drag.type==='trend'){S.drag.x2=x;S.drag.y2=y}else S.drag.b=a[i]?.c||S.drag.b;draw()});
 cv.addEventListener('pointerup',()=>{S.drag=null});
 $('entryGuard')?.addEventListener('change',e=>{ENTRY_GUARD=e.target.checked;updateEntryButtons()});
-async function closePosition(){
-  if(!confirm(`Tutup posisi ${S.symbol} sekarang pada harga market?
-Ini akan menutup posisi yang sedang terbuka.`))return;
+$('autoTrade')?.addEventListener('change',e=>{AUTO_ENTRY=!!e.target.checked;localStorage.setItem('obsidian_auto_trade',AUTO_ENTRY?'1':'0');if(AUTO_ENTRY){setAutoStatus('AUTO TRADE AKTIF · menunggu candle close + sinyal kuat','good')}else setAutoStatus('AUTO TRADE MATI · order hanya manual','wait');updateEntryButtons()});
+setTimeout(()=>{const a=$('autoTrade');if(a)a.checked=AUTO_ENTRY;setAutoStatus(AUTO_ENTRY?'AUTO TRADE AKTIF · menunggu sinyal kuat':'AUTO TRADE MATI · order hanya manual',AUTO_ENTRY?'good':'wait')},0);
+async function closePosition(opts={}){
+  if(!opts.silent&&!confirm(`Tutup posisi ${S.symbol} sekarang pada harga market?\nIni akan menutup posisi yang sedang terbuka.`))return;
   const rt=await jsonFetch('/api/runtime').catch(e=>({error:e.message}));if(rt.error)return alert(rt.error);
   const mode=String(rt.tradingMode||'paper').toLowerCase();
   const x=await jsonFetch(mode==='paper'?'/api/paper/close':'/api/live/close',{method:'POST',headers:H(),body:JSON.stringify({symbol:S.symbol})}).catch(e=>({error:e.message}));
