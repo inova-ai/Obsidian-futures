@@ -1,8 +1,8 @@
-# Obsidian Futures v5.36.0 — Realtime Market Sync
+# Obsidian Futures v5.37.0 — Realtime Market Sync
 
 Patch focused on making **Signal Drop** an auditable next-candle predictor instead of a live, constantly changing forecast.
 
-## Realtime market-sync patch (5.36.0)
+## Realtime market-sync patch (5.37.0)
 - Migrated Binance USDⓈ-M market WebSocket URLs to the current `/market` and `/public` routing. Binance retired the legacy WebSocket routing in 2026.
 - Candles now use direct Binance WebSocket market data as the primary source instead of a 1-second REST request that could overwrite newer ticks.
 - `aggTrade` updates the live candle immediately; kline updates remain the canonical OHLC/volume stream.
@@ -50,3 +50,11 @@ Replace the previous package with this ZIP. Keep the existing Binance credential
 - Auto profit protection now closes only after the configured profit giveback condition; a momentary opposite signal cannot force a close/re-entry loop.
 - Entry and profit-protection automation share a mutual busy guard. The last processed signal and cooldown survive page reloads in localStorage.
 - Deploy this build to Vercel and keep only one dashboard tab open while testing in Demo Futures.
+
+
+## Simple Auto Trade update
+- Auto entry threshold: score 60, gap 5, no mandatory 2-candle confirmation.
+- Auto loss cut: Rp700 by default, configurable in UI.
+- Profit protection remains peak/giveback based.
+- Re-entry cooldown after auto close: 15 seconds.
+- These controls are risk management only and do not guarantee profit.

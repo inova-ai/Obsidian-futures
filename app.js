@@ -7,17 +7,20 @@ async function ensureAuth(){try{let z=await jsonFetch('/api/auth/status');if(z.a
 let AI_TREND={side:'WAIT',score:0,reason:[],lastNotified:null,sr:null};
 let SR_STATE={support:null,resistance:null,context:'NO_LEVEL',distanceSupport:null,distanceResistance:null};
 let SIGNALS=[];
-const SIGNAL_KEY='obsidian_signal_drop_v3';
+const SIGNAL_KEY='obsidian_signal_drop_v4';
 let AUTO_ENTRY=localStorage.getItem('obsidian_auto_trade')==='1';
-let AUTO_CONFIRM_SCORE=70;
-let AUTO_CONFIRM_GAP=10;
+let AUTO_CONFIRM_SCORE=60;
+let AUTO_CONFIRM_GAP=5;
 let lastAutoSignalKey=localStorage.getItem('obsidian_auto_last_signal')||null;
 let AUTO_COOLDOWN_UNTIL=Number(localStorage.getItem('obsidian_auto_cooldown')||0);
 let autoBusy=false;
 let AUTO_PROFIT_ARM_IDR=5000;
 let AUTO_PROFIT_GIVEBACK_PCT=10;
-let AUTO_REENTRY_SCORE=70;
-let AUTO_REENTRY_GAP=10;
+let AUTO_REENTRY_SCORE=60;
+let AUTO_REENTRY_GAP=5;
+// Simple risk controls: close a losing position quickly; let profitable positions run.
+let AUTO_LOSS_CUT_IDR=700;
+let AUTO_PROTECT_COOLDOWN_MS=15000;
 let AUTO_PROTECT={key:null,side:null,peak:0,armed:false,lastActionAt:0};
 let autoProtectBusy=false;
 let lastSignalSlot=null,lastSignalSide=null;
@@ -168,11 +171,11 @@ function hybridPredictiveCandle(closed, live){
   let side='WAIT';
   const twoSidedConflict = bull>=48 && bear>=48 && gap<5;
   // Realtime confirmation uses the same quality gate as the frozen Signal Drop.
-  const strongBull = bull>=62 && gap>=8;
-  const strongBear = bear>=62 && gap>=8;
+  const strongBull = bull>=68 && gap>=12 && Number(base.confirmations||0)>=4;
+  const strongBear = bear>=68 && gap>=12 && Number(base.confirmations||0)>=4;
   if(!twoSidedConflict && strongBull)side='BUY';
   else if(!twoSidedConflict && strongBear)side='SELL';
-  else reason.push(twoSidedConflict?'Realtime conflict → WAIT':'Realtime belum cukup kuat: skor ≥62 dan gap ≥8 diperlukan → WAIT');
+  else reason.push(twoSidedConflict?'Realtime conflict → WAIT':'Realtime belum cukup kuat: skor ≥68, gap ≥12, dan ≥4 konfirmasi → WAIT');
   return {...base,side,score,bull,bear,gap,reason:reason.slice(-8),strength:score>=78?'HIGH':score>=62?'MEDIUM':'LOW'};
 }
 function getFinalSignal(){
@@ -198,7 +201,7 @@ function syncPendingFinalSignal(){
   const changed=row.side!==next.side||Number(row.score)!==next.score||Number(row.gap)!==next.gap||row.strength!==next.strength||JSON.stringify(row.reason)!==JSON.stringify(next.reason);
   if(changed){SIGNALS[idx]=next;persistSignals();renderSignalDrop();renderFutureForecast();}
 }
-function updateLiveSignal(){if(!S.c.length)return;const c=S.c.at(-1),t=getFinalSignal();const dir=c.c>c.o?'NAIK · B':c.c<c.o?'TURUN · S':'DATAR';const box=$('liveSignalBox'),sig=$('liveEntrySignal'),score=$('liveSignalScore'),cd=$('candleCountdown'),ct=$('candleTime'),clock=$('liveClock'),cdir=$('liveCandleDirection'),cprice=$('liveCandlePrice'),ls=$('signalLiveSide'),lm=$('signalLiveMeta');if(sig){sig.textContent=t.side==='BUY'?'BUY':t.side==='SELL'?'SELL':'WAIT';sig.className='signal '+(t.side==='BUY'?'good':t.side==='SELL'?'bad':'wait')}if(score)score.textContent=`FINAL SIGNAL · ${t.score||0}/100 · ${t.strength||'LOW'} · ${(t.reason||['Belum cukup konfirmasi']).slice(0,2).join(' · ')}`;if(box)box.className='liveBox '+(t.side==='BUY'?'signalBuy':t.side==='SELL'?'signalSell':'signalWait');if(cdir){cdir.textContent=dir;cdir.className=''+(dir.startsWith('NAIK')?'good':dir.startsWith('TURUN')?'bad':'wait')}if(cprice)cprice.textContent=`${fmtIDR(c.c)} · Buka ${fmtIDR(c.o)}`;const ms=tfMillis(S.tf),remain=Math.max(0,(c.t+ms)-Date.now()),sec=Math.floor(remain/1000),mm=String(Math.floor(sec/60)).padStart(2,'0'),ss=String(sec%60).padStart(2,'0');if(cd)cd.textContent=`${mm}:${ss}`;if(ct)ct.textContent=`Candle ${new Date(c.t).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})}–${new Date(c.t+ms).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})} WIB`;if(clock)clock.textContent=new Date().toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit',second:'2-digit'});if(ls){ls.textContent=t.side==='BUY'?'BUY ↑':t.side==='SELL'?'SELL ↓':'WAIT •';ls.className='signalSide '+(t.side==='BUY'?'good':t.side==='SELL'?'bad':'wait')}if(lm)lm.textContent=`FINAL ${t.side} · ${t.score||0}/100 · ${dir} · alasan: ${(t.reason||['—']).slice(0,2).join(' / ')}`;AI_TREND=t; syncPendingFinalSignal(); updateEntryButtons()}
+function updateLiveSignal(){if(!S.c.length)return;const c=S.c.at(-1),t=getFinalSignal();const dir=c.c>c.o?'NAIK · B':c.c<c.o?'TURUN · S':'DATAR';const box=$('liveSignalBox'),sig=$('liveEntrySignal'),score=$('liveSignalScore'),cd=$('candleCountdown'),ct=$('candleTime'),clock=$('liveClock'),cdir=$('liveCandleDirection'),cprice=$('liveCandlePrice'),ls=$('signalLiveSide'),lm=$('signalLiveMeta');if(sig){sig.textContent=t.side==='BUY'?'BUY':t.side==='SELL'?'SELL':'WAIT';sig.className='signal '+(t.side==='BUY'?'good':t.side==='SELL'?'bad':'wait')}if(score)score.textContent=`FINAL SIGNAL · ${t.score||0}/100 · ${t.strength||'LOW'} · ${t.confirmations||0} KONF · ${(t.reason||['Belum cukup konfirmasi']).slice(0,2).join(' · ')}`;if(box)box.className='liveBox '+(t.side==='BUY'?'signalBuy':t.side==='SELL'?'signalSell':'signalWait');if(cdir){cdir.textContent=dir;cdir.className=''+(dir.startsWith('NAIK')?'good':dir.startsWith('TURUN')?'bad':'wait')}if(cprice)cprice.textContent=`${fmtIDR(c.c)} · Buka ${fmtIDR(c.o)}`;const ms=tfMillis(S.tf),remain=Math.max(0,(c.t+ms)-Date.now()),sec=Math.floor(remain/1000),mm=String(Math.floor(sec/60)).padStart(2,'0'),ss=String(sec%60).padStart(2,'0');if(cd)cd.textContent=`${mm}:${ss}`;if(ct)ct.textContent=`Candle ${new Date(c.t).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})}–${new Date(c.t+ms).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})} WIB`;if(clock)clock.textContent=new Date().toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit',second:'2-digit'});if(ls){ls.textContent=t.side==='BUY'?'BUY ↑':t.side==='SELL'?'SELL ↓':'WAIT •';ls.className='signalSide '+(t.side==='BUY'?'good':t.side==='SELL'?'bad':'wait')}if(lm)lm.textContent=`FINAL ${t.side} · ${t.score||0}/100 · ${t.confirmations||0} KONF · ${dir} · alasan: ${(t.reason||['—']).slice(0,2).join(' / ')}`;AI_TREND=t; syncPendingFinalSignal(); updateEntryButtons()}
 function fmtDuration(ms){if(!Number.isFinite(ms)||ms<0)return '—';const sec=Math.floor(ms/1000),d=Math.floor(sec/86400),h=Math.floor(sec%86400/3600),m=Math.floor(sec%3600/60),ss=sec%60;return (d?d+'h ':'')+String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(ss).padStart(2,'0')}
 function updateLivePositionHero(p){
   const hero=$('livePositionHero'),badge=$('liveHeroBadge'); if(!hero||!badge)return;
@@ -222,7 +225,7 @@ function updateLivePositionHero(p){
   $('liveHeroClock').textContent=new Date(now).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit',second:'2-digit'});$('liveHeroUpdated').textContent=new Date(now).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit',second:'2-digit'});
 }
 function tickLivePositionHero(){updateLivePositionHero(S.accountPosition);}
-function renderAccountDock(x){if(!x)return;const b=x.balances?.find(z=>z.asset==='USDT'),p=(x.binancePositions||x.positions||[]).find(z=>z.symbol===S.symbol&&Math.abs(Number(z.positionAmt||0))>0);S.accountPosition=p||null;scheduleDraw();const bal=Number(b?.balance||0),av=Number(b?.availableBalance||0),up=Number(p?.unRealizedProfit||0),entry=Number(p?.entryPrice||0),mark=Number(p?.markPrice||S.market.mark||0),qty=Number(p?.positionAmt||0),notional=Math.abs(entry*qty),roe=notional?up/Math.max(1,Math.abs(notional)/Math.max(1,Number(p?.leverage||+$('lev').value||1)))*100:0,rp=Number(x.lastRealizedPnL);$('dockBalance').textContent=fmtIDR(bal);$('dockDanaTersedia').textContent=fmtIDR(av);$('dockUpnl').textContent=fmtIDR(up);$('dockUpnl').className=up>0?'pnlProfit':up<0?'pnlLoss':'';$('dockDD').textContent=x.guard?.dd==null?'—':fmt(x.guard.dd)+'%';if($('dockRealized')){$('dockRealized').textContent=Number.isFinite(rp)?fmtIDR(rp):'—';$('dockRealized').className=Number.isFinite(rp)?(rp>=0?'pnlProfit':'pnlLoss'):''}$('accountDockMode').textContent=x.accountType||'ACCOUNT';$('dockPositionStatus').textContent=p?'OPEN POSITION · TERDETEKSI DI BINANCE':'NO OPEN POSITION';$('dockArah').textContent=p?(Number(p.positionAmt)>0?'LONG':'SHORT'):'—';$('dockArah').className=p?(Number(p.positionAmt)>0?'good':'bad'):'';$('dockHargaMasuk').textContent=p?fmtIDR(entry):'—';$('dockHargaMark').textContent=p?fmtIDR(mark):fmtIDR(S.market.mark);$('dockJumlah').textContent=p?fmt(Math.abs(qty)):'—';$('dockPnl').textContent=p?fmtIDR(up):'—';$('dockPnl').className=p?(up>=0?'pnlProfit':'pnlLoss'):'';$('dockRoe').textContent=p?fmt(roe)+'%':'—';$('balance').textContent=fmtIDR(bal);$('availableBalance').textContent=fmtIDR(av);$('upnl').textContent=fmtIDR(up);$('liqPrice').textContent=p?fmtIDR(p.liquidationPrice):'—';$('dd').textContent=x.guard?.dd==null?'—':fmt(x.guard.dd)+'%';const closeBtn=$('closePosition'),entryBtns=[$('long'),$('short'),$('quickLong'),$('quickShort')].filter(Boolean);if(closeBtn){closeBtn.disabled=!p;closeBtn.style.opacity=p?'1':'.45'}entryBtns.forEach(btn=>{btn.disabled=!!p;btn.style.opacity=p?'.45':'1';btn.title=p?'Tutup posisi aktif terlebih dahulu sebelum entry baru.':''});if(p){$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="${up>=0?'good':'bad'}">${up>=0?'PROFIT':'LOSS'} ${fmtIDR(up)} · OPEN</b><div class="note">${Number(p.positionAmt)>0?'BUY / LONG':'SELL / SHORT'} · Masuk ${fmtIDR(entry)} · Mark ${fmtIDR(mark)} · Jumlah ${fmt(Math.abs(qty))} · ROE ${fmt(roe)}%</div><div class="note bad">PnL/posisi bersumber dari Binance positionRisk. Membuka halaman tidak membuat order baru. Tutup posisi ini sebelum entry berikutnya.</div>`}else if(Number.isFinite(rp)){$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="${rp>=0?'good':'bad'}">LAST REALIZED: ${rp>=0?'PROFIT':'LOSS'} ${fmtIDR(rp)}</b><div class="note">LIVE POSITION: <b>CLOSED / 0 BTC</b> · Saldo diambil langsung dari Binance.</div>`}else{$('orderResult').style.display='none'};updateLivePositionHero(p)}
+function renderAccountDock(x){if(!x)return;const b=x.balances?.find(z=>z.asset==='USDT'),p=(x.binancePositions||x.positions||[]).find(z=>z.symbol===S.symbol&&Math.abs(Number(z.positionAmt||0))>0);S.accountPosition=p||null;scheduleDraw();const bal=Number(b?.balance||0),av=Number(b?.availableBalance||0),up=Number(p?.unRealizedProfit||0),entry=Number(p?.entryPrice||0),mark=Number(p?.markPrice||S.market.mark||0),qty=Number(p?.positionAmt||0),notional=Math.abs(entry*qty),roe=notional?up/Math.max(1,Math.abs(notional)/Math.max(1,Number(p?.leverage||+$('lev').value||1)))*100:0,rp=Number(x.lastRealizedPnL);$('dockBalance').textContent=fmtIDR(bal);$('dockDanaTersedia').textContent=fmtIDR(av);$('dockUpnl').textContent=fmtIDR(up);$('dockUpnl').className=up>0?'pnlProfit':up<0?'pnlLoss':'';$('dockDD').textContent=x.guard?.dd==null?'—':fmt(x.guard.dd)+'%';if($('dockRealized')){$('dockRealized').textContent=Number.isFinite(rp)?fmtIDR(rp):'—';$('dockRealized').className=Number.isFinite(rp)?(rp>=0?'pnlProfit':'pnlLoss'):''}const rt=Number(x.realizedPnlTotal);if($('dockRealizedTotal')){$('dockRealizedTotal').textContent=Number.isFinite(rt)?fmtIDR(rt):'—';$('dockRealizedTotal').className=Number.isFinite(rt)?(rt>=0?'pnlProfit':'pnlLoss'):''}$('accountDockMode').textContent=x.accountType||'ACCOUNT';$('dockPositionStatus').textContent=p?'OPEN POSITION · TERDETEKSI DI BINANCE':'NO OPEN POSITION';$('dockArah').textContent=p?(Number(p.positionAmt)>0?'LONG':'SHORT'):'—';$('dockArah').className=p?(Number(p.positionAmt)>0?'good':'bad'):'';$('dockHargaMasuk').textContent=p?fmtIDR(entry):'—';$('dockHargaMark').textContent=p?fmtIDR(mark):fmtIDR(S.market.mark);$('dockJumlah').textContent=p?fmt(Math.abs(qty)):'—';$('dockPnl').textContent=p?fmtIDR(up):'—';$('dockPnl').className=p?(up>=0?'pnlProfit':'pnlLoss'):'';$('dockRoe').textContent=p?fmt(roe)+'%':'—';$('balance').textContent=fmtIDR(bal);$('availableBalance').textContent=fmtIDR(av);$('upnl').textContent=fmtIDR(up);$('liqPrice').textContent=p?fmtIDR(p.liquidationPrice):'—';$('dd').textContent=x.guard?.dd==null?'—':fmt(x.guard.dd)+'%';const closeBtn=$('closePosition'),entryBtns=[$('long'),$('short'),$('quickLong'),$('quickShort')].filter(Boolean);if(closeBtn){closeBtn.disabled=!p;closeBtn.style.opacity=p?'1':'.45'}entryBtns.forEach(btn=>{btn.disabled=!!p;btn.style.opacity=p?'.45':'1';btn.title=p?'Tutup posisi aktif terlebih dahulu sebelum entry baru.':''});if(p){$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="${up>=0?'good':'bad'}">${up>=0?'PROFIT':'LOSS'} ${fmtIDR(up)} · OPEN</b><div class="note">${Number(p.positionAmt)>0?'BUY / LONG':'SELL / SHORT'} · Masuk ${fmtIDR(entry)} · Mark ${fmtIDR(mark)} · Jumlah ${fmt(Math.abs(qty))} · ROE ${fmt(roe)}%</div><div class="note bad">PnL/posisi bersumber dari Binance positionRisk. Membuka halaman tidak membuat order baru. Tutup posisi ini sebelum entry berikutnya.</div>`}else if(Number.isFinite(rp)){$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="${rp>=0?'good':'bad'}">LAST REALIZED: ${rp>=0?'PROFIT':'LOSS'} ${fmtIDR(rp)}</b><div class="note">LIVE POSITION: <b>CLOSED / 0 BTC</b> · Saldo diambil langsung dari Binance.</div>`}else{$('orderResult').style.display='none'};updateLivePositionHero(p)}
 
 function updateModeUI(rt){if(!rt)return;const mode=String(rt.tradingMode||'paper').toUpperCase();$('mode').textContent=mode;$('accountMode').textContent=mode==='DEMO'?'BINANCE DEMO':mode==='LIVE'?'BINANCE LIVE':'PAPER';const note=$('executionNote');if(note)note.textContent=mode==='DEMO'?'BUY/SELL akan mengirim order ke Binance Futures DEMO (virtual funds).':mode==='LIVE'?'BUY/SELL akan mengirim order ke Binance Futures LIVE. Periksa API permission sebelum entry.':'BUY/SELL hanya membuat posisi PAPER lokal.';}
 async function depth(){try{let o=await jsonFetch(`/api/open-interest?symbol=${S.symbol}`);if(!o.error)$('oi').textContent=fmt(o.openInterest)}catch{}}
@@ -257,99 +260,115 @@ function detectSR(c){
 }
 function predictiveCandle(c){
   const sr=detectSR(c);
-  if(!c||c.length<35)return {side:'WAIT',score:0,bull:0,bear:0,reason:['Need candle history'],strength:'LOW',sr};
+  if(!c||c.length<55)return {side:'WAIT',score:0,bull:0,bear:0,gap:0,reason:['Need at least 55 closed candles'],strength:'LOW',confirmations:0,sr};
 
-  // This model predicts the NEXT candle, not the prevailing trend.
-  // Trend/MTF is context only; candle structure and S/R can override it.
+  // v5.37 signal engine: closed-candle-first, multi-factor confluence.
+  // It intentionally prefers WAIT when trend/momentum/structure disagree.
   const a=c, n=a.length-1, x=a[n], prev=a[n-1];
-  let bull=0,bear=0,reason=[];
-  const range=Math.max(1e-12,x.h-x.l);
-  const body=Math.abs(x.c-x.o);
-  const upper=x.h-Math.max(x.o,x.c);
-  const lower=Math.min(x.o,x.c)-x.l;
+  let bull=0,bear=0,reason=[],confirmationsBull=0,confirmationsBear=0;
+  const range=Math.max(1e-12,x.h-x.l), body=Math.abs(x.c-x.o);
+  const upper=x.h-Math.max(x.o,x.c), lower=Math.min(x.o,x.c)-x.l;
+  const closes=a.map(z=>z.c), vols=a.map(z=>Number(z.v||0));
+  const e9=EMA(closes,9),e21=EMA(closes,21),e50=EMA(closes,50);
+  const rsi=RSI(closes,14), macd=MACD(closes), adx=ADX(a,14), vwap=VWAP(a);
+  const atr=ATR(a,14);
+  const avgVol=SMA(vols,20), volRatio=vols[n]/Math.max(1e-12,avgVol[n-1]||avgVol[n]);
+  const slope=(arr,k)=>arr[n]-arr[Math.max(0,n-k)];
+  const e9s=slope(e9,3), e21s=slope(e21,5), vwapS=slope(vwap,5), atrNow=atr[n]||range;
+  const bodyPct=body/range;
 
-  // Candle structure
-  if(lower/range>=.40){bull+=18;reason.push('Lower-wick rejection');}
-  if(upper/range>=.40){bear+=18;reason.push('Upper-wick rejection');}
-  if(body/range>=.50&&x.c>x.o){bull+=14;reason.push('Bullish body/close kuat');}
-  if(body/range>=.50&&x.c<x.o){bear+=14;reason.push('Bearish body/close kuat');}
-  if(x.c>prev.c){bull+=7}else if(x.c<prev.c){bear+=7}
+  // 1) Candle structure / rejection
+  if(lower/range>=.45){bull+=12;confirmationsBull++;reason.push('Lower-wick rejection');}
+  if(upper/range>=.45){bear+=12;confirmationsBear++;reason.push('Upper-wick rejection');}
+  if(bodyPct>=.58&&x.c>x.o){bull+=12;confirmationsBull++;reason.push('Bullish close kuat');}
+  if(bodyPct>=.58&&x.c<x.o){bear+=12;confirmationsBear++;reason.push('Bearish close kuat');}
 
-  // Short-term momentum
-  const recent=a.slice(-8);
-  const ups=recent.filter((z,i)=>i&&z.c>recent[i-1].c).length;
-  const downs=recent.filter((z,i)=>i&&z.c<recent[i-1].c).length;
-  if(ups>=5){bull+=10;reason.push('Momentum candle bullish');}
-  if(downs>=5){bear+=10;reason.push('Momentum candle bearish');}
+  // Engulfing adds confirmation only when it agrees with the close direction.
+  const prevBody=Math.abs(prev.c-prev.o);
+  const bullEng=prev.c<prev.o&&x.c>x.o&&x.o<=prev.c&&x.c>=prev.o&&body>=prevBody*.9;
+  const bearEng=prev.c>prev.o&&x.c<x.o&&x.o>=prev.c&&x.c<=prev.o&&body>=prevBody*.9;
+  if(bullEng){bull+=10;confirmationsBull++;reason.push('Bullish engulfing');}
+  if(bearEng){bear+=10;confirmationsBear++;reason.push('Bearish engulfing');}
 
-  const closes=a.map(z=>z.c);
-  const e9=EMA(closes,9),e21=EMA(closes,21);
-  const slope9=e9[n]-e9[Math.max(0,n-3)];
-  if(e9[n]>e21[n]&&slope9>0){bull+=9;reason.push('Momentum EMA naik');}
-  if(e9[n]<e21[n]&&slope9<0){bear+=9;reason.push('Momentum EMA turun');}
+  // 2) Trend alignment (fast/medium/slow)
+  if(e9[n]>e21[n]&&e21[n]>e50[n]&&e9s>0&&e21s>0){bull+=16;confirmationsBull++;reason.push('Trend EMA 9>21>50');}
+  else if(e9[n]<e21[n]&&e21[n]<e50[n]&&e9s<0&&e21s<0){bear+=16;confirmationsBear++;reason.push('Trend EMA 9<21<50');}
+  else if(e9[n]>e21[n]&&e9s>0){bull+=7;confirmationsBull++;reason.push('EMA momentum naik');}
+  else if(e9[n]<e21[n]&&e9s<0){bear+=7;confirmationsBear++;reason.push('EMA momentum turun');}
 
-  // S/R is a directional input, not just an informational label.
-  if(sr.context==='SUPPORT_REJECTION'){bull+=22;reason.push('Rejection di support');}
-  if(sr.context==='RESISTANCE_REJECTION'){bear+=22;reason.push('Rejection di resistance');}
-  if(sr.support&&x.c>sr.support&&prev.c<=sr.support){bull+=16;reason.push('Reclaim support');}
-  if(sr.resistance&&x.c<sr.resistance&&prev.c>=sr.resistance){bear+=16;reason.push('Reject resistance');}
-  if(sr.resistance&&x.c>sr.resistance&&prev.c<=sr.resistance){bull+=16;reason.push('Breakout resistance');}
-  if(sr.support&&x.c<sr.support&&prev.c>=sr.support){bear+=16;reason.push('Breakdown support');}
-
-  // Near a level, the next candle has less room to continue in the same direction.
-  // A rejection gets priority over the broader trend.
-  const nearPct=0.35;
-  if(sr.resistance&&sr.distanceResistance!=null&&sr.distanceResistance<nearPct){
-    bear+=14; bull-=10; reason.push('Harga dekat resistance → proyeksi SELL diperkuat');
+  // 3) Momentum: RSI + MACD must agree rather than using one indicator alone.
+  const rv=Number(rsi[n]), rp=Number(rsi[Math.max(0,n-3)]);
+  if(Number.isFinite(rv)){
+    if(rv>=52&&rv<=70&&rv>rp){bull+=10;confirmationsBull++;reason.push(`RSI bullish ${rv.toFixed(0)}`);}
+    if(rv<=48&&rv>=30&&rv<rp){bear+=10;confirmationsBear++;reason.push(`RSI bearish ${rv.toFixed(0)}`);}
+    if(rv>=76){bear+=5;bull-=4;reason.push('RSI terlalu panas → BUY dikurangi');}
+    if(rv<=24){bull+=5;bear-=4;reason.push('RSI terlalu rendah → SELL dikurangi');}
   }
-  if(sr.support&&sr.distanceSupport!=null&&sr.distanceSupport<nearPct){
-    bull+=14; bear-=10; reason.push('Harga dekat support → proyeksi BUY diperkuat');
+  if(macd.h[n]>0&&macd.h[n]>macd.h[Math.max(0,n-1)]){bull+=10;confirmationsBull++;reason.push('MACD histogram menguat');}
+  else if(macd.h[n]<0&&macd.h[n]<macd.h[Math.max(0,n-1)]){bear+=10;confirmationsBear++;reason.push('MACD histogram melemah');}
+
+  // 4) Trend strength / VWAP
+  const av=Number(adx[n]);
+  if(Number.isFinite(av)&&av>=20){
+    if(e21[n]>e50[n]&&e21s>0){bull+=7;confirmationsBull++;reason.push(`ADX ${av.toFixed(0)} + trend bullish`);}
+    if(e21[n]<e50[n]&&e21s<0){bear+=7;confirmationsBear++;reason.push(`ADX ${av.toFixed(0)} + trend bearish`);}
+  }else if(Number.isFinite(av)&&av<16){reason.push('ADX rendah → market cenderung choppy');}
+  if(x.c>vwap[n]&&vwapS>0){bull+=7;confirmationsBull++;reason.push('Harga di atas VWAP');}
+  if(x.c<vwap[n]&&vwapS<0){bear+=7;confirmationsBear++;reason.push('Harga di bawah VWAP');}
+
+  // 5) Volume confirmation: breakout without volume is treated cautiously.
+  if(volRatio>=1.25){
+    if(x.c>x.o){bull+=7;confirmationsBull++;reason.push(`Volume konfirmasi ${volRatio.toFixed(1)}×`);}
+    if(x.c<x.o){bear+=7;confirmationsBear++;reason.push(`Volume konfirmasi ${volRatio.toFixed(1)}×`);}
   }
 
-  // MTF is deliberately a capped context signal. It must not turn a bullish
-  // trend into a permanent BUY sequence when the next candle disagrees.
-  const mtfWeights={ '1m':3, '5m':5, '15m':6, '1h':7, '4h':5 };
+  // 6) S/R: rejection and clean break are stronger than simply being near a level.
+  if(sr.context==='SUPPORT_REJECTION'){bull+=18;confirmationsBull++;reason.push('Rejection support');}
+  if(sr.context==='RESISTANCE_REJECTION'){bear+=18;confirmationsBear++;reason.push('Rejection resistance');}
+  if(sr.support&&x.c>sr.support&&prev.c<=sr.support){bull+=12;confirmationsBull++;reason.push('Reclaim support');}
+  if(sr.resistance&&x.c<sr.resistance&&prev.c>=sr.resistance){bear+=12;confirmationsBear++;reason.push('Reject resistance');}
+  if(sr.resistance&&x.c>sr.resistance&&prev.c<=sr.resistance&&volRatio>=1.15){bull+=14;confirmationsBull++;reason.push('Breakout resistance + volume');}
+  if(sr.support&&x.c<sr.support&&prev.c>=sr.support&&volRatio>=1.15){bear+=14;confirmationsBear++;reason.push('Breakdown support + volume');}
+
+  // 7) Recent range breakout. Require volume or strong body so ordinary wicks do not trigger entries.
+  const prior20=a.slice(Math.max(0,n-20),n), hi20=Math.max(...prior20.map(z=>z.h)), lo20=Math.min(...prior20.map(z=>z.l));
+  if(x.c>hi20&&bodyPct>=.55&&volRatio>=1.15){bull+=12;confirmationsBull++;reason.push('Breakout 20-candle');}
+  if(x.c<lo20&&bodyPct>=.55&&volRatio>=1.15){bear+=12;confirmationsBear++;reason.push('Breakdown 20-candle');}
+
+  // 8) Exhaustion filter near S/R. It reduces chasing into a nearby barrier.
+  const nearPct=.35;
+  if(sr.resistance&&sr.distanceResistance!=null&&sr.distanceResistance<nearPct&&x.c<sr.resistance){bear+=9;bull-=7;reason.push('Dekat resistance → hindari chase BUY');}
+  if(sr.support&&sr.distanceSupport!=null&&sr.distanceSupport<nearPct&&x.c>sr.support){bull+=9;bear-=7;reason.push('Dekat support → hindari chase SELL');}
+
+  // 9) MTF context. Higher timeframes can veto a weak counter-trend signal.
+  const mtfWeights={ '1m':2, '5m':4, '15m':6, '1h':8, '4h':6 };
   let mtfBull=0,mtfBear=0;
   if(S.mtf&&typeof S.mtf==='object'){
     for(const [tf,w] of Object.entries(mtfWeights)){
       const v=S.mtf[tf]; if(!v)continue;
-      const adx=Number(v.ad);
-      const strength=Number.isFinite(adx)?clamp(adx/35,0.55,1.15):0.8;
+      const ad=Number(v.ad), strength=Number.isFinite(ad)?clamp(ad/30,.6,1.25):.8;
       if(v.dir==='BULL')mtfBull+=w*strength;
       else if(v.dir==='BEAR')mtfBear+=w*strength;
     }
   }
-  if(mtfBull>mtfBear+4){bull+=Math.min(16,mtfBull);reason.push('MTF bullish (context)');}
-  else if(mtfBear>mtfBull+4){bear+=Math.min(16,mtfBear);reason.push('MTF bearish (context)');}
+  if(mtfBull>mtfBear+5){bull+=Math.min(14,mtfBull);confirmationsBull++;reason.push('MTF bullish selaras');}
+  else if(mtfBear>mtfBull+5){bear+=Math.min(14,mtfBear);confirmationsBear++;reason.push('MTF bearish selaras');}
 
   bull=Math.max(0,Math.min(100,bull));
   bear=Math.max(0,Math.min(100,bear));
   const gap=Math.abs(bull-bear),score=Math.max(bull,bear);
-
-  // Three-level decision:
-  // BUY/SELL must have a real directional edge, but the bar must not be so
-  // strict that normal market structure becomes WAIT almost everywhere.
-  // If both sides have meaningful evidence and are close, keep WAIT.
+  const dominant=bull>=bear?'BUY':'SELL';
+  const dominantConfirmations=dominant==='BUY'?confirmationsBull:confirmationsBear;
+  const opposite=dominant==='BUY'?bear:bull;
+  const adxOk=Number.isFinite(av)?av>=18:true;
+  const mtfConflictBull=mtfBear>mtfBull+7, mtfConflictBear=mtfBull>mtfBear+7;
+  const conflict=(bull>=50&&bear>=50&&gap<8);
+  const trendWeak=(dominant==='BUY'&&!adxOk&&confirmationsBull<4)||(dominant==='SELL'&&!adxOk&&confirmationsBear<4);
   let side='WAIT';
-  const twoSidedConflict = bull>=48 && bear>=48 && gap<5;
-  // Quality gate: a directional label is not an entry signal unless the
-  // evidence is strong enough. This prevents LOW-confidence BUY/SELL calls
-  // such as 53/100 when the higher timeframes and momentum disagree.
-  const mtfConflictBull = mtfBear > mtfBull + 5;
-  const mtfConflictBear = mtfBull > mtfBear + 5;
-  const strongBull = bull >= 62 && gap >= 8 && !mtfConflictBull;
-  const strongBear = bear >= 62 && gap >= 8 && !mtfConflictBear;
-  if(!twoSidedConflict && strongBull)side='BUY';
-  else if(!twoSidedConflict && strongBear)side='SELL';
-  else reason.push(twoSidedConflict?'Konflik bullish/bearish → WAIT':
-    (mtfConflictBull||mtfConflictBear)?'MTF berlawanan terlalu kuat → WAIT':'Belum cukup kuat: perlu skor ≥62 dan gap ≥8 → WAIT');
-
-  return {
-    side,score,bull,bear,gap,mtfBull,mtfBear,
-    reason:reason.slice(-8),
-    strength:score>=78?'HIGH':score>=62?'MEDIUM':'LOW',
-    sr
-  };
+  if(!conflict&&dominantConfirmations>=4&&score>=68&&gap>=12&&!trendWeak&&!(dominant==='BUY'&&mtfConflictBull)&&!(dominant==='SELL'&&mtfConflictBear))side=dominant;
+  else reason.push(conflict?'Konflik BUY/SELL → WAIT':trendWeak?'Trend strength belum cukup → WAIT':'Konfirmasi belum cukup (≥4 faktor, skor ≥68, gap ≥12) → WAIT');
+  const strength=score>=82&&gap>=18&&dominantConfirmations>=5?'HIGH':score>=68&&gap>=12&&dominantConfirmations>=4?'MEDIUM':'LOW';
+  return {side,score,bull,bear,gap,mtfBull,mtfBear,confirmations:dominantConfirmations,confirmationsBull,confirmationsBear,adx:av,rsi:rv,volumeRatio:volRatio,atr:atrNow,reason:reason.slice(-9),strength,sr};
 }
 function aiCandleTrend(c){
   if(!c||c.length<30)return {side:'WAIT',score:0,reason:['Need at least 30 candles'],strength:'LOW'};
@@ -633,7 +652,7 @@ async function scheduleAutoTrade(row){
   const gap=Number(row.gap||0);
   if(gap<AUTO_CONFIRM_GAP)return;
   const prev=SIGNALS.find(x=>x.symbol===row.symbol&&x.tf===row.tf&&Number(x.anchorTs)===Number(row.anchorTs)-tfMillis(row.tf));
-  if(!prev||prev.side!==row.side||Number(prev.score||0)<AUTO_CONFIRM_SCORE||Number(prev.gap||0)<AUTO_CONFIRM_GAP){setAutoStatus(`AUTO: ${row.side} belum terkonfirmasi 2 candle · tunggu`, 'wait');return;}
+  /* One strong closed-candle signal is enough for AUTO. Do not force a second-candle wait. */
   if(lastAutoSignalKey===row.key)return;
   if(Date.now()<AUTO_COOLDOWN_UNTIL){setAutoStatus('AUTO: jeda pengaman setelah perubahan posisi · menunggu candle berikutnya','wait');return;}
   lastAutoSignalKey=row.key;
@@ -646,7 +665,7 @@ async function scheduleAutoTrade(row){
     if(current&&current!==row.side){
       setAutoStatus(`AUTO: sinyal berlawanan terkonfirmasi · menutup ${current}; entry balik ditunda satu candle`,'wait');
       await closePosition({silent:true,auto:true});
-      AUTO_COOLDOWN_UNTIL=Date.now()+tfMillis(row.tf);
+      AUTO_COOLDOWN_UNTIL=Date.now()+AUTO_PROTECT_COOLDOWN_MS;
       try{localStorage.setItem('obsidian_auto_cooldown',String(AUTO_COOLDOWN_UNTIL))}catch{}
       await refreshAccount();
       if(S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0)throw Error('Posisi belum flat setelah close; entry baru dikunci.');
@@ -672,6 +691,22 @@ async function autoProfitProtect(){
   const side=currentPositionSide();
   const up=Number(p.unRealizedProfit||0);
   if(!Number.isFinite(up))return;
+  // Simple cut-loss: close as soon as the running loss reaches the configured IDR limit.
+  const lossCutUSDT=AUTO_LOSS_CUT_IDR/USDT_IDR_RATE;
+  if(up<=-lossCutUSDT){
+    if(Date.now()-AUTO_PROTECT.lastActionAt<3000)return;
+    AUTO_PROTECT.lastActionAt=Date.now(); autoProtectBusy=true;
+    try{
+      setAutoStatus(`AUTO PROTECT: loss ${fmtUSDT(up)} melewati batas · CLOSE…`,'bad');
+      await closePosition({silent:true,auto:true});
+      await refreshAccount();
+      AUTO_COOLDOWN_UNTIL=Date.now()+AUTO_PROTECT_COOLDOWN_MS;
+      try{localStorage.setItem('obsidian_auto_cooldown',String(AUTO_COOLDOWN_UNTIL))}catch{}
+      setAutoStatus('AUTO PROTECT: posisi rugi ditutup · tunggu sinyal berikutnya','wait');
+    }catch(e){setAutoStatus(`AUTO CUT LOSS GAGAL: ${e.message}`,'bad');}
+    finally{autoProtectBusy=false;}
+    return;
+  }
   const qty=Math.abs(Number(p.positionAmt||0));
   const key=[S.symbol,side,Number(p.entryPrice||0).toFixed(8),qty.toFixed(8)].join('|');
   if(AUTO_PROTECT.key!==key){AUTO_PROTECT={key,side,peak:up,armed:false,lastActionAt:0};}
@@ -763,12 +798,13 @@ cv.addEventListener('pointerdown',e=>{let r=cv.getBoundingClientRect(),x=e.clien
 cv.addEventListener('pointermove',e=>{if(!S.drag)return;let r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top,{a,dx,py}=priceMap(),i=clamp(Math.round((x-45)/dx),0,a.length-1);if(S.drag.type==='trend'){S.drag.x2=x;S.drag.y2=y}else S.drag.b=a[i]?.c||S.drag.b;draw()});
 cv.addEventListener('pointerup',()=>{S.drag=null});
 $('entryGuard')?.addEventListener('change',e=>{ENTRY_GUARD=e.target.checked;updateEntryButtons()});
+function syncAutoRiskUI(){const el=$('autoLossCut');if(el){el.value=AUTO_LOSS_CUT_IDR;el.addEventListener('input',e=>{AUTO_LOSS_CUT_IDR=Math.max(0,Number(e.target.value)||0);});}}
 function syncAutoTradeUI(){const b=$('autoTradeBtn');if(b){b.textContent=AUTO_ENTRY?'AUTO: ON':'AUTO: OFF';b.className='btn '+(AUTO_ENTRY?'long':'');b.setAttribute('aria-pressed',AUTO_ENTRY?'true':'false');}setAutoStatus(AUTO_ENTRY?'AUTO AKTIF · entry + proteksi berjalan selama dashboard terbuka':'AUTO TRADE MATI · order hanya manual',AUTO_ENTRY?'good':'wait');}
 $('autoTradeBtn')?.addEventListener('click',()=>{AUTO_ENTRY=!AUTO_ENTRY;localStorage.setItem('obsidian_auto_trade',AUTO_ENTRY?'1':'0');syncAutoTradeUI();updateEntryButtons()});
 $('autoProfitArm')?.addEventListener('input',e=>{AUTO_PROFIT_ARM_IDR=Math.max(0,Number(e.target.value)||0)});
 $('autoProfitGiveback')?.addEventListener('input',e=>{AUTO_PROFIT_GIVEBACK_PCT=Math.min(90,Math.max(5,Number(e.target.value)||35))});
 
-setTimeout(syncAutoTradeUI,0);
+setTimeout(()=>{syncAutoTradeUI();syncAutoRiskUI();},0);
 async function closePosition(opts={}){
   if(!opts.silent&&!confirm(`Tutup posisi ${S.symbol} sekarang pada harga market?\nIni akan menutup posisi yang sedang terbuka.`))return;
   const rt=await jsonFetch('/api/runtime').catch(e=>({error:e.message}));if(rt.error)return alert(rt.error);
