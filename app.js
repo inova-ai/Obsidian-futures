@@ -7,7 +7,7 @@ async function ensureAuth(){try{let z=await jsonFetch('/api/auth/status');if(z.a
 let AI_TREND={side:'WAIT',score:0,reason:[],lastNotified:null,sr:null};
 let SR_STATE={support:null,resistance:null,context:'NO_LEVEL',distanceSupport:null,distanceResistance:null};
 let SIGNALS=[];
-const SIGNAL_KEY='obsidian_signal_drop_v534_calibrated';
+const SIGNAL_KEY='obsidian_signal_drop_v3';
 const AUTO_ENTRY=false; // Startup is read-only: never place an order automatically.
 let lastSignalSlot=null,lastSignalSide=null;
 try{SIGNALS=JSON.parse(localStorage.getItem(SIGNAL_KEY)||'[]')}catch{SIGNALS=[]}
@@ -18,31 +18,10 @@ let ENTRY_GUARD=true;
 let MANUAL_ENTRY_STOP=false;
 let deferredInstallPrompt=null;
 let lastLivePriceTs=0;
-// Entry direction is confirmed only after several consecutive live samples.
-// This prevents a single noisy tick from immediately cancelling an otherwise
-// valid entry direction while still allowing a sustained reversal to block it.
-const LIVE_FLIP_CONFIRMATIONS=3;
-let LIVE_CONFIRMED_SIDE='WAIT';
-let LIVE_PENDING_SIDE='WAIT';
-let LIVE_PENDING_COUNT=0;
 function scheduleDraw(){if(drawRAF)return;drawRAF=requestAnimationFrame(()=>{drawRAF=0;safeDraw()})}
-function observedLiveSide(){const c=S.c.at(-1); if(!c)return 'WAIT'; const pred=AI_TREND?.side||'WAIT'; const candle=c.c>c.o?'BUY':c.c<c.o?'SELL':'WAIT'; if(pred!=='WAIT')return pred; return candle;}
-function confirmLiveDirection(observed){
-  observed=observed==='BUY'||observed==='SELL'||observed==='WAIT'?observed:'WAIT';
-  if(observed===LIVE_CONFIRMED_SIDE){LIVE_PENDING_SIDE='WAIT';LIVE_PENDING_COUNT=0;return LIVE_CONFIRMED_SIDE;}
-  if(observed!==LIVE_PENDING_SIDE){LIVE_PENDING_SIDE=observed;LIVE_PENDING_COUNT=1;}
-  else LIVE_PENDING_COUNT++;
-  if(LIVE_PENDING_COUNT>=LIVE_FLIP_CONFIRMATIONS){LIVE_CONFIRMED_SIDE=observed;LIVE_PENDING_SIDE='WAIT';LIVE_PENDING_COUNT=0;}
-  return LIVE_CONFIRMED_SIDE;
-}
-function currentLiveSide(){return LIVE_CONFIRMED_SIDE;}
-function liveDirectionStatus(){
-  const raw=observedLiveSide(), confirmed=LIVE_CONFIRMED_SIDE;
-  if(raw===confirmed)return {raw,confirmed,pending:0,required:LIVE_FLIP_CONFIRMATIONS,stable:true};
-  return {raw,confirmed,pending:LIVE_PENDING_COUNT,required:LIVE_FLIP_CONFIRMATIONS,stable:false};
-}
-function entryGuard(side){if(MANUAL_ENTRY_STOP)return {ok:false,live:currentLiveSide(),reason:'STOP ENTRY aktif secara manual.'}; const live=currentLiveSide(); return {ok:true,live,warning:(ENTRY_GUARD&&live!==side)?(live==='WAIT'?'Sinyal live belum terkonfirmasi. Entry manual tetap diizinkan.':'Sinyal live berlawanan. Entry manual tetap diizinkan.'):''};}
-function updateEntryButtons(){const live=currentLiveSide(); const ds=liveDirectionStatus(); const stopped=MANUAL_ENTRY_STOP; const lb=$('long'),sb=$('short'),ql=$('quickLong'),qs=$('quickShort'); [lb,ql,sb,qs].forEach(b=>{if(b){b.disabled=stopped;b.classList.toggle('entryStopped',b.disabled);b.title=b.disabled?'STOP ENTRY aktif.':(ENTRY_GUARD&&live!==(b===lb||b===ql?'BUY':'SELL')?`Peringatan: sinyal live ${live}. Entry manual tetap diizinkan.`:'')}}); const st=$('entryGuardStatus'); if(st)st.textContent=stopped?'STOP ENTRY AKTIF · order baru dihentikan':(ENTRY_GUARD?(ds.stable?`Perlindungan sinyal: ${live} · entry manual tetap diizinkan`:`Sinyal live ${ds.raw} · KONFIRMASI ${ds.pending}/${ds.required} · entry manual tetap diizinkan`):'Perlindungan sinyal: MATI'); if(st)st.className='note '+(live==='BUY'?'good':live==='SELL'?'bad':'wait');}
+function currentLiveSide(){const c=S.c.at(-1); if(!c)return 'WAIT'; const pred=AI_TREND?.side||'WAIT'; const candle=c.c>c.o?'BUY':c.c<c.o?'SELL':'WAIT'; if(pred!=='WAIT')return pred; return candle;}
+function entryGuard(side){if(MANUAL_ENTRY_STOP)return {ok:false,live:currentLiveSide(),reason:'STOP ENTRY aktif secara manual.'}; if(!ENTRY_GUARD)return {ok:true}; const live=currentLiveSide(); if(live!==side)return {ok:false,live,reason:live==='WAIT'?'Arah belum jelas (WAIT).':'Arah live berubah berlawanan.'}; return {ok:true,live};}
+function updateEntryButtons(){const live=currentLiveSide(); const stopped=MANUAL_ENTRY_STOP; const lb=$('long'),sb=$('short'),ql=$('quickLong'),qs=$('quickShort'); [lb,ql,sb,qs].forEach(b=>{if(b){b.disabled=stopped || (ENTRY_GUARD && ((b===lb||b===ql)?live!=='BUY':live!=='SELL'));b.classList.toggle('entryStopped',b.disabled);b.title=b.disabled?(stopped?'STOP ENTRY aktif.':`Entry dihentikan: sinyal live ${live}.`):''}}); const st=$('entryGuardStatus'); if(st)st.textContent=stopped?'STOP ENTRY AKTIF · order baru dihentikan':(ENTRY_GUARD?`Perlindungan entry: AKTIF · Arah live ${live}`:'Perlindungan entry: MATI'); if(st)st.className='note '+(live==='BUY'?'good':live==='SELL'?'bad':'wait');}
 
 
 let MARKET_WS_BASE='wss://fstream.binance.com';
@@ -135,7 +114,7 @@ function hline(p,py,w,col){ctx.strokeStyle=col;ctx.setLineDash([4,4]);ctx.beginP
 function dot(i,p,dx,py,col,t){let x=45+i*dx,y=py(p);ctx.fillStyle=col;ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fill();ctx.fillText(t,x+4,y-4)}
 async function load(){chartStatus('Mengambil data candlestick…');try{try{const rt=await jsonFetch('/api/runtime');MARKET_WS_BASE=rt.marketWs||rt.binanceWs||MARKET_WS_BASE;USDT_IDR_RATE=Number(rt.usdtIdrRate||USDT_IDR_RATE);updateModeUI(rt);await loadOrderConstraints()}catch{}let r=await fetch(`/api/klines?symbol=${S.symbol}&interval=${S.tf}&limit=500`),source=r.headers.get('X-Market-Data-Source')||'binance';let d=await r.json();if(!r.ok||d.error)throw Error(d.error||`Market data HTTP ${r.status}`);S.c=d.map(x=>({t:+x[0],o:+x[1],h:+x[2],l:+x[3],c:+x[4],v:+x[5]}));$('price').textContent=fmtIDR(S.c.at(-1)?.c);$('conn').textContent=source==='bybit-fallback'?'MARKET DATA FALLBACK':'BINANCE DATA';$('conn').title=source==='bybit-fallback'?'Binance market-data access is unavailable; chart is using Bybit USDT perpetual public market data as a fallback.':'Binance Futures market data';S.swings=swings(S.c);smart();safeDraw();calc();connect();depth();if(!livePollTimer){pollLive();livePollTimer=setInterval(pollLive,1000)}if($('signalTf'))$('signalTf').value=S.tf;mtf();refreshSignalFromCurrent();updateAITrend();updateLiveSignal();}catch(e){$('conn').textContent='MARKET DATA ERROR';$('conn').title=e.message;chartStatus('Data chart gagal dimuat: '+e.message+' — periksa /api/klines dan konfigurasi Vercel.');startPolling()}}
 function stopPolling(){if(pollTimer){clearInterval(pollTimer);pollTimer=null}}
-async function pollKlines(){try{const r=await fetch(`/api/klines?symbol=${S.symbol}&interval=${S.tf}&limit=500`);const d=await r.json();if(!r.ok||d.error)throw Error(d.error||`Market data HTTP ${r.status}`);const rows=d.map(x=>({t:+x[0],o:+x[1],h:+x[2],l:+x[3],c:+x[4],v:+x[5]}));if(!rows.length)return;const previousLast=S.c.at(-1);S.c=rows;if(previousLast&&S.c.at(-1)?.t>previousLast.t){const justClosed=S.c.at(-2);if(justClosed)recordClosedSignal(justClosed)}const source=r.headers.get('X-Market-Data-Source')||'binance';$('price').textContent=fmtIDR(S.c.at(-1).c);$('conn').textContent=source==='bybit-fallback'?'POLLING · BYBIT FALLBACK':'POLLING';S.swings=swings(S.c);smart();calc();safeDraw()}catch(e){$('conn').title=e.message}}
+async function pollKlines(){try{const r=await fetch(`/api/klines?symbol=${S.symbol}&interval=${S.tf}&limit=500`);const d=await r.json();if(!r.ok||d.error)throw Error(d.error||`Market data HTTP ${r.status}`);const rows=d.map(x=>({t:+x[0],o:+x[1],h:+x[2],l:+x[3],c:+x[4],v:+x[5]}));if(!rows.length)return;S.c=rows;const source=r.headers.get('X-Market-Data-Source')||'binance';$('price').textContent=fmtIDR(S.c.at(-1).c);$('conn').textContent=source==='bybit-fallback'?'POLLING · BYBIT FALLBACK':'POLLING';S.swings=swings(S.c);smart();calc();safeDraw()}catch(e){$('conn').title=e.message}}
 async function pollLive(){try{const r=await fetch(`/api/market/ticker?symbol=${S.symbol}&interval=${S.tf}`,{cache:'no-store'});const d=await r.json();if(!r.ok||d.error)throw Error(d.error||`Market ticker HTTP ${r.status}`);if(d.candle){const c={t:+d.candle.t,o:+d.candle.o,h:+d.candle.h,l:+d.candle.l,c:+d.candle.c,v:+d.candle.v},q=S.c.at(-1);if(q?.t===c.t)S.c[S.c.length-1]=c;else if(!q||c.t>q.t)S.c.push(c);if(S.c.length>500)S.c.shift();$('price').textContent=fmtIDR(c.c);$('mark').textContent=fmtIDR(d.markPrice);$('index').textContent=fmtIDR(d.indexPrice);$('funding').textContent=(+d.fundingRate*100).toFixed(4)+'%';S.market.mark=+d.markPrice;S.market.index=+d.indexPrice;S.market.funding=+d.fundingRate;updateLiveSignal();S.swings=swings(S.c);smart();calc();safeDraw()} }catch(e){$('conn').title='Live ticker fallback: '+e.message}}
 function startPolling(){if(pollTimer)return;pollKlines();pollTimer=setInterval(pollKlines,5000)}
 let wsRetry=0,wsRetryTimer=null;
@@ -170,17 +149,7 @@ function hybridPredictiveCandle(closed, live){
   else reason.push(twoSidedConflict?'Realtime conflict → WAIT':'Realtime belum cukup dominan');
   return {...base,side,score,bull,bear,gap,reason:reason.slice(-8),strength:score>=78?'HIGH':score>=62?'MEDIUM':'LOW'};
 }
-
-// SINGLE SOURCE OF TRUTH for the current signal.
-// The UI used to mix predictiveCandle(), hybridPredictiveCandle(), and
-// aiCandleTrend(), so different panels could legitimately show BUY/SELL/WAIT
-// at the same moment. Current-signal panels now all use this function.
-function finalSignal(closed, live){
-  const t=hybridPredictiveCandle(closed, live);
-  return {...t,signalModel:'UNIFIED_HYBRID',signalScope:'CURRENT_CANDLE'};
-}
-
-function updateLiveSignal(){if(!S.c.length)return;const c=S.c.at(-1),closed=S.c.length>1?S.c.slice(0,-1):S.c,t=finalSignal(closed,c);confirmLiveDirection(t.side);const dir=c.c>c.o?'NAIK · B':c.c<c.o?'TURUN · S':'DATAR';const box=$('liveSignalBox'),sig=$('liveEntrySignal'),score=$('liveSignalScore'),cd=$('candleCountdown'),ct=$('candleTime'),clock=$('liveClock'),cdir=$('liveCandleDirection'),cprice=$('liveCandlePrice'),ls=$('signalLiveSide'),lm=$('signalLiveMeta');if(sig){sig.textContent=t.side==='BUY'?'B':t.side==='SELL'?'S':'WAIT';sig.className='signal '+(t.side==='BUY'?'good':t.side==='SELL'?'bad':'wait')}if(score)score.textContent=`${t.score||0}/100 · ${t.strength||'LOW'} · ${t.reason?.[0]||'Membaca sumbu dan momentum'}`;if(box)box.className='liveBox '+(t.side==='BUY'?'signalBuy':t.side==='SELL'?'signalSell':'signalWait');if(cdir){cdir.textContent=dir;cdir.className=''+(dir.startsWith('NAIK')?'good':dir.startsWith('TURUN')?'bad':'wait')}if(cprice)cprice.textContent=`${fmtIDR(c.c)} · Buka ${fmtIDR(c.o)}`;const ms=tfMillis(S.tf),remain=Math.max(0,(c.t+ms)-Date.now()),sec=Math.floor(remain/1000),mm=String(Math.floor(sec/60)).padStart(2,'0'),ss=String(sec%60).padStart(2,'0');if(cd)cd.textContent=`${mm}:${ss}`;if(ct)ct.textContent=`Candle ${new Date(c.t).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})}–${new Date(c.t+ms).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})} WIB`;if(clock)clock.textContent=new Date().toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit',second:'2-digit'});if(ls){ls.textContent=t.side==='BUY'?'B ↑':t.side==='SELL'?'S ↓':'WAIT •';ls.className='signalSide '+(t.side==='BUY'?'good':t.side==='SELL'?'bad':'wait')}if(lm)lm.textContent=`${t.score||0}/100 · ${dir} · close ${mm}:${ss}`;AI_TREND=t; updateEntryButtons()}
+function updateLiveSignal(){if(!S.c.length)return;const c=S.c.at(-1),closed=S.c.length>1?S.c.slice(0,-1):S.c,t=hybridPredictiveCandle(closed,c);const dir=c.c>c.o?'NAIK · B':c.c<c.o?'TURUN · S':'DATAR';const box=$('liveSignalBox'),sig=$('liveEntrySignal'),score=$('liveSignalScore'),cd=$('candleCountdown'),ct=$('candleTime'),clock=$('liveClock'),cdir=$('liveCandleDirection'),cprice=$('liveCandlePrice'),ls=$('signalLiveSide'),lm=$('signalLiveMeta');if(sig){sig.textContent=t.side==='BUY'?'B':t.side==='SELL'?'S':'WAIT';sig.className='signal '+(t.side==='BUY'?'good':t.side==='SELL'?'bad':'wait')}if(score)score.textContent=`${t.score||0}/100 · ${t.strength||'LOW'} · ${t.reason?.[0]||'Membaca sumbu dan momentum'}`;if(box)box.className='liveBox '+(t.side==='BUY'?'signalBuy':t.side==='SELL'?'signalSell':'signalWait');if(cdir){cdir.textContent=dir;cdir.className=''+(dir.startsWith('NAIK')?'good':dir.startsWith('TURUN')?'bad':'wait')}if(cprice)cprice.textContent=`${fmtIDR(c.c)} · Buka ${fmtIDR(c.o)}`;const ms=tfMillis(S.tf),remain=Math.max(0,(c.t+ms)-Date.now()),sec=Math.floor(remain/1000),mm=String(Math.floor(sec/60)).padStart(2,'0'),ss=String(sec%60).padStart(2,'0');if(cd)cd.textContent=`${mm}:${ss}`;if(ct)ct.textContent=`Candle ${new Date(c.t).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})}–${new Date(c.t+ms).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})} WIB`;if(clock)clock.textContent=new Date().toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit',second:'2-digit'});if(ls){ls.textContent=t.side==='BUY'?'B ↑':t.side==='SELL'?'S ↓':'WAIT •';ls.className='signalSide '+(t.side==='BUY'?'good':t.side==='SELL'?'bad':'wait')}if(lm)lm.textContent=`${t.score||0}/100 · ${dir} · close ${mm}:${ss}`;AI_TREND=t; updateEntryButtons()}
 function renderAccountDock(x){if(!x)return;const b=x.balances?.find(z=>z.asset==='USDT'),p=(x.binancePositions||x.positions||[]).find(z=>z.symbol===S.symbol&&Math.abs(Number(z.positionAmt||0))>0);S.accountPosition=p||null;scheduleDraw();const bal=Number(b?.balance||0),av=Number(b?.availableBalance||0),up=Number(p?.unRealizedProfit||0),entry=Number(p?.entryPrice||0),mark=Number(p?.markPrice||S.market.mark||0),qty=Number(p?.positionAmt||0),notional=Math.abs(entry*qty),roe=notional?up/Math.max(1,Math.abs(notional)/Math.max(1,Number(p?.leverage||+$('lev').value||1)))*100:0,rp=Number(x.lastRealizedPnL);$('dockBalance').textContent=fmtIDR(bal);$('dockDanaTersedia').textContent=fmtIDR(av);$('dockUpnl').textContent=fmtIDR(up);$('dockUpnl').className=up>0?'pnlProfit':up<0?'pnlLoss':'';$('dockDD').textContent=x.guard?.dd==null?'—':fmt(x.guard.dd)+'%';if($('dockRealized')){$('dockRealized').textContent=Number.isFinite(rp)?fmtIDR(rp):'—';$('dockRealized').className=Number.isFinite(rp)?(rp>=0?'pnlProfit':'pnlLoss'):''}$('accountDockMode').textContent=x.accountType||'ACCOUNT';$('dockPositionStatus').textContent=p?'OPEN POSITION · TERDETEKSI DI BINANCE':'NO OPEN POSITION';$('dockArah').textContent=p?(Number(p.positionAmt)>0?'LONG':'SHORT'):'—';$('dockArah').className=p?(Number(p.positionAmt)>0?'good':'bad'):'';$('dockHargaMasuk').textContent=p?fmtIDR(entry):'—';$('dockHargaMark').textContent=p?fmtIDR(mark):fmtIDR(S.market.mark);$('dockJumlah').textContent=p?fmt(Math.abs(qty)):'—';$('dockPnl').textContent=p?fmtIDR(up):'—';$('dockPnl').className=p?(up>=0?'pnlProfit':'pnlLoss'):'';$('dockRoe').textContent=p?fmt(roe)+'%':'—';$('balance').textContent=fmtIDR(bal);$('availableBalance').textContent=fmtIDR(av);$('upnl').textContent=fmtIDR(up);$('liqPrice').textContent=p?fmtIDR(p.liquidationPrice):'—';$('dd').textContent=x.guard?.dd==null?'—':fmt(x.guard.dd)+'%';const closeBtn=$('closePosition'),entryBtns=[$('long'),$('short'),$('quickLong'),$('quickShort')].filter(Boolean);if(closeBtn){closeBtn.disabled=!p;closeBtn.style.opacity=p?'1':'.45'}entryBtns.forEach(btn=>{btn.disabled=!!p;btn.style.opacity=p?'.45':'1';btn.title=p?'Tutup posisi aktif terlebih dahulu sebelum entry baru.':''});if(p){$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="${up>=0?'good':'bad'}">${up>=0?'PROFIT':'LOSS'} ${fmtIDR(up)} · OPEN</b><div class="note">${Number(p.positionAmt)>0?'BUY / LONG':'SELL / SHORT'} · Masuk ${fmtIDR(entry)} · Mark ${fmtIDR(mark)} · Jumlah ${fmt(Math.abs(qty))} · ROE ${fmt(roe)}%</div><div class="note bad">Posisi ini terdeteksi dari akun Binance saat sinkronisasi. Membuka halaman tidak membuat order baru. Tutup posisi ini sebelum entry berikutnya.</div>`}else if(Number.isFinite(rp)){$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="${rp>=0?'good':'bad'}">LAST REALIZED: ${rp>=0?'PROFIT':'LOSS'} ${fmtIDR(rp)}</b><div class="note">LIVE POSITION: <b>CLOSED / 0 BTC</b> · Saldo diambil langsung dari Binance.</div>`}else{$('orderResult').style.display='none'}}
 
 function updateModeUI(rt){if(!rt)return;const mode=String(rt.tradingMode||'paper').toUpperCase();$('mode').textContent=mode;$('accountMode').textContent=mode==='DEMO'?'BINANCE DEMO':mode==='LIVE'?'BINANCE LIVE':'PAPER';const note=$('executionNote');if(note)note.textContent=mode==='DEMO'?'BUY/SELL akan mengirim order ke Binance Futures DEMO (virtual funds).':mode==='LIVE'?'BUY/SELL akan mengirim order ke Binance Futures LIVE. Periksa API permission sebelum entry.':'BUY/SELL hanya membuat posisi PAPER lokal.';}
@@ -338,29 +307,9 @@ function aiCandleTrend(c){
   else {score=Math.max(bull,bear);reason.push('Arah belum cukup dominan → WAIT')}
   return {side,score,bull,bear,reason,strength:score>=75?'HIGH':score>=60?'MEDIUM':'LOW'};
 }
-let LAST_TRADE_ALERT_KEY='';
-function updateTradeAlert(){
-  const el=$('tradeAlert');if(!el)return;
-  const closed=S.c.length>1?S.c.slice(0,-1):S.c, live=S.c.at(-1); if(!closed.length||!live)return;
-  const cur=finalSignal(closed,live), nx=nextCandleForecast(S.c), pos=S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0?S.accountPosition:null;
-  const confirmed=currentLiveSide();
-  let type='wait',state='JANGAN ENTRY DULU',text='Arah candle berikutnya belum cukup terkonfirmasi.';
-  if(pos){
-    const posSide=Number(pos.positionAmt)>0?'BUY':'SELL';
-    if(nx.side===posSide && cur.side===posSide){type='hold';state=`PERTAHANKAN ${posSide==='BUY'?'LONG':'SHORT'}`;text=`Arah posisi masih sejalan. Pantau SL/TP dan jangan tutup hanya karena satu candle kecil.`;}
-    else if(confirmed!== 'WAIT' && confirmed!==posSide && nx.side!==posSide){type='sell';state='WASPADA · SIAP REVIEW TUTUP';text=`Arah live dan prediksi berikutnya berlawanan dengan posisi ${posSide}. Review posisi; sistem tidak menutup otomatis.`;}
-    else {type='hold';state=`PANTAU ${posSide==='BUY'?'LONG':'SHORT'}`;text=`Sinyal campuran. Belum ada konfirmasi pembalikan yang cukup untuk menyarankan penutupan.`;}
-  }else if(!MANUAL_ENTRY_STOP && nx.side!=='WAIT' && cur.side===nx.side && (confirmed==='WAIT'||confirmed===nx.side)){
-    type=nx.side==='BUY'?'buy':'sell';state=`WAKTU REVIEW ENTRY ${nx.side==='BUY'?'BUY / LONG':'SELL / SHORT'}`;text=`Prediksi candle berikutnya ${nx.side} · confidence ${nx.confidence}%. Ini peringatan untuk review entry manual, bukan jaminan profit.`;
-  }else if(MANUAL_ENTRY_STOP){type='wait';state='STOP ENTRY AKTIF';text='Order baru sedang dihentikan secara manual.';}
-  else {type='wait';state='JANGAN ENTRY DULU';text=`Final ${cur.side} · next candle ${nx.side} · live ${confirmed}. Tunggu konfirmasi yang searah.`;}
-  el.className=`tradeAlert ${type}`;const a=$('tradeAlertState'),b=$('tradeAlertText'),tm=$('tradeAlertTime');if(a)a.textContent=state;if(b)b.textContent=text;if(tm)tm.textContent=new Date().toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit',second:'2-digit'});
-  const key=`${type}|${state}|${nx.side}|${confirmed}|${pos?'1':'0'}`;
-  if(key!==LAST_TRADE_ALERT_KEY){LAST_TRADE_ALERT_KEY=key;try{if('Notification' in window&&Notification.permission==='granted')new Notification('Obsidian Futures',{body:`${state} · ${text}`})}catch{}}
-}
 function updateAITrend(){
   const closed=S.c.length>1?S.c.slice(0,-1):S.c;
-  const t=finalSignal(closed,S.c.at(-1));
+  const t=predictiveCandle(closed);
   const prev=AI_TREND.side; AI_TREND=t;
   const el=$('aiSignal'); if(el){
     el.textContent=t.side;
@@ -376,8 +325,7 @@ function updateAITrend(){
     }
   }
   const lb=$('aiLong'),sb=$('aiShort');
-  updateEntryButtons();
-  updateTradeAlert();
+  if(lb)lb.disabled=ENTRY_GUARD && t.side!=='BUY'; if(sb)sb.disabled=ENTRY_GUARD && t.side!=='SELL'; updateEntryButtons();
 }
 function signalTime(ts){return new Date(ts||Date.now()).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})+' WIB'}
 function nextCandleTime(ts){const ms=tfMillis(S.tf);return new Date(Math.floor((ts+ms)/ms)*ms).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})+' WIB'}
@@ -398,58 +346,10 @@ function buildProjectionModel(c){
   const rejection=clamp(((Math.min(last.o,last.c)-last.l)-(last.h-Math.max(last.o,last.c)))/wickRange*18,-18,18);
   return {closed,last,prev,sr,base,trend,atr,avgRet,avgAbs,emaBias,rejection};
 }
-function nextCandleForecast(c){
-  if(!c||c.length<40)return {side:'WAIT',score:0,confidence:0,bull:0,bear:0,reason:['Menunggu minimal 40 candle']};
-  const closed=c.slice(0,-1), last=closed.at(-1), prev=closed.at(-2), sr=detectSR(closed);
-  const closes=closed.map(x=>x.c), atr=ATR(closed).at(-1)||Math.abs(last.c-prev.c)||1;
-  const e9=EMA(closes,9),e21=EMA(closes,21),e50=EMA(closes,50),rsi=RSI(closes).at(-1)||50;
-  const mac=MACD(closes), hist=mac.h.at(-1)||0, histPrev=mac.h.at(-2)||0;
-  let bull=0,bear=0,reason=[];
-  const recent=closed.slice(-6), ups=recent.slice(1).filter((x,i)=>x.c>recent[i].c).length, downs=recent.slice(1).filter((x,i)=>x.c<recent[i].c).length;
-  const range=Math.max(1e-12,last.h-last.l), body=Math.abs(last.c-last.o), bodyRatio=body/range;
-  const upper=last.h-Math.max(last.o,last.c), lower=Math.min(last.o,last.c)-last.l;
-  // Closed-candle structure: strongest evidence for the immediate next candle.
-  if(last.c>last.o){bull+=14; if(bodyRatio>=.55){bull+=8;reason.push('candle close bullish kuat')}}
-  if(last.c<last.o){bear+=14; if(bodyRatio>=.55){bear+=8;reason.push('candle close bearish kuat')}}
-  if(lower/range>=.42){bull+=12;reason.push('rejection bawah')}
-  if(upper/range>=.42){bear+=12;reason.push('rejection atas')}
-  if(ups>=4){bull+=10;reason.push('momentum 5 candle naik')}
-  if(downs>=4){bear+=10;reason.push('momentum 5 candle turun')}
-  // EMA slope / alignment.
-  const s9=e9.at(-1)-e9.at(-4),s21=e21.at(-1)-e21.at(-4);
-  if(e9.at(-1)>e21.at(-1)&&s9>0){bull+=10;reason.push('EMA 9/21 bullish')}
-  if(e9.at(-1)<e21.at(-1)&&s9<0){bear+=10;reason.push('EMA 9/21 bearish')}
-  if(e21.at(-1)>e50.at(-1)&&s21>0){bull+=6}else if(e21.at(-1)<e50.at(-1)&&s21<0){bear+=6}
-  // RSI is used as momentum confirmation, not as a blind overbought/oversold rule.
-  if(rsi>=52&&rsi<=72){bull+=7;reason.push('RSI mendukung bullish')}
-  if(rsi<=48&&rsi>=28){bear+=7;reason.push('RSI mendukung bearish')}
-  // MACD histogram direction.
-  if(hist>0&&hist>=histPrev){bull+=7;reason.push('MACD momentum naik')}
-  if(hist<0&&hist<=histPrev){bear+=7;reason.push('MACD momentum turun')}
-  // S/R reaction can override a weak continuation signal.
-  if(sr.context==='SUPPORT_REJECTION'){bull+=15;reason.push('support rejection')}
-  if(sr.context==='RESISTANCE_REJECTION'){bear+=15;reason.push('resistance rejection')}
-  if(sr.resistance&&sr.distanceResistance!=null&&sr.distanceResistance<0.28){bear+=9;bull-=5;reason.push('dekat resistance')}
-  if(sr.support&&sr.distanceSupport!=null&&sr.distanceSupport<0.28){bull+=9;bear-=5;reason.push('dekat support')}
-  // MTF context is capped so it cannot dominate the immediate candle model.
-  const mtfWeights={'1m':2,'5m':3,'15m':4,'1h':4,'4h':3};
-  if(S.mtf){for(const [tf,w] of Object.entries(mtfWeights)){const v=S.mtf[tf];if(!v)continue;const adx=Number(v.ad);const k=Number.isFinite(adx)?clamp(adx/35,.55,1.1):.8;if(v.dir==='BULL')bull+=w*k;else if(v.dir==='BEAR')bear+=w*k;}}
-  // Order-book imbalance is only a small live context signal.
-  const bids=(S.book?.bids||[]).slice(0,8).reduce((a,x)=>a+Number(x[1]||0),0), asks=(S.book?.asks||[]).slice(0,8).reduce((a,x)=>a+Number(x[1]||0),0), imb=(bids+asks)>0?(bids-asks)/(bids+asks):0;
-  if(imb>.12){bull+=5;reason.push('order book condong bid')}
-  if(imb<-.12){bear+=5;reason.push('order book condong ask')}
-  bull=clamp(Math.round(bull),0,100);bear=clamp(Math.round(bear),0,100);
-  const gap=Math.abs(bull-bear),score=Math.max(bull,bear);
-  let side='WAIT';
-  if(bull>=58&&gap>=10)side='BUY';else if(bear>=58&&gap>=10)side='SELL';else reason.push('konfirmasi belum cukup');
-  const confidence=Math.min(95,Math.round(50+gap*.9+(score-50)*.35));
-  return {side,score,confidence,bull,bear,gap,reason:reason.slice(-6),sr,rsi,atr,signalClose:last.c};
-}
 function projectFutureSignals(){
   const tf=$('signalTf')?.value||S.tf, ms=tfMillis(tf), model=buildProjectionModel(S.c);
   if(!model)return [];
   const {last,sr,base,trend,atr,avgRet,avgAbs,emaBias,rejection}=model;
-  const next=nextCandleForecast(S.c);
   const out=[];
   let virtual=last.c;
   let pressure=clamp(avgRet/Math.max(atr,1),-0.75,0.75);
@@ -492,9 +392,6 @@ function projectFutureSignals(){
     // Start from current candle evidence but progressively reduce it.
     let bull=base.bull*decay;
     let bear=base.bear*decay;
-    if(h===1){
-      bull=next.bull; bear=next.bear;
-    }
 
     // Projected path itself is evidence for this candle.
     if(pathDir>0)bull+=18*decay;
@@ -537,7 +434,7 @@ function projectFutureSignals(){
 
     bull=clamp(Math.round(bull),0,100);
     bear=clamp(Math.round(bear),0,100);
-    let gap=Math.abs(bull-bear),score=Math.max(bull,bear);
+    const gap=Math.abs(bull-bear),score=Math.max(bull,bear);
     let side='WAIT';
 
     const twoSidedConflict = bull>=45 && bear>=45 && gap<9;
@@ -546,8 +443,6 @@ function projectFutureSignals(){
     else if(srConflict&&!twoSidedConflict&&bull>=62&&gap>=10)side='BUY';
     else if(srConflict&&!twoSidedConflict&&bear>=62&&gap>=10)side='SELL';
 
-    if(h===1 && next.side!=='WAIT'){side=next.side;bull=next.bull;bear=next.bear;gap=next.gap;score=next.score;}
-    const confidence=h===1?next.confidence:Math.min(92,Math.round(50+gap*.85+(score-50)*.3));
     const strength=score>=78?'HIGH':score>=62?'MEDIUM':'LOW';
     const reason=side==='BUY'
       ? (srConflict?'support/breakout + projected path':h<=2?'next-candle momentum + structure':'projected bullish path')
@@ -556,7 +451,7 @@ function projectFutureSignals(){
         : (srConflict?'S/R conflict → WAIT':'candle projection conflict → WAIT');
 
     const ts=Math.floor((last.t+ms*h)/ms)*ms;
-    out.push({ts,side,score,confidence,strength,horizon:h,reason,virtual,bull,bear,gap});
+    out.push({ts,side,score,strength,horizon:h,reason,virtual,bull,bear,gap});
 
     // The next projected candle starts from the path just produced.
     pressure=clamp((step/Math.max(atr,1))*.72,-0.8,0.8);
@@ -564,82 +459,98 @@ function projectFutureSignals(){
   return out;
 }
 function renderFutureForecast(){
-  const el=$('forecastFeed'); if(!el)return;
-  const rows=projectFutureSignals();
-  const count=$('forecastCount'); if(count)count.textContent=`${rows.length||26} candle`;
-  if(!rows.length){el.innerHTML='<div class="note">Menunggu minimal 36 candle untuk proyeksi.</div>';return}
-  const seq=rows.map(x=>x.side==='BUY'?'B':x.side==='SELL'?'S':'•').join(' ');
-  const patt=$('forecastPattern'); if(patt)patt.textContent=seq;
-  const nx=rows[0];
-  const ns=$('nextForecastSide'),nc=$('nextForecastConfidence');
-  if(ns){ns.textContent=nx?(nx.side==='BUY'?'BUY ↑':nx.side==='SELL'?'SELL ↓':'WAIT •'):'WAIT •';ns.className=nx?(nx.side==='BUY'?'good':nx.side==='SELL'?'bad':'wait'):'';}
-  if(nc)nc.textContent=nx?`${nx.confidence||nx.score}% · ${nx.strength}`:'—';
-  el.innerHTML=rows.map((x,i)=>{
-    const side=x.side==='BUY'?'B':x.side==='SELL'?'S':'WAIT', cls=x.side==='BUY'?'buy':x.side==='SELL'?'sell':'wait', arrow=x.side==='BUY'?'↑':x.side==='SELL'?'↓':'•';
-    return `<div class="forecastRow ${i===0?'next':''}"><span class="forecastTime">${forecastLabel(x.ts)}</span><span class="forecastSide ${cls}">${side} ${arrow}<span class="forecastConf">${x.confidence||x.score}%</span></span><span class="forecastMeta">${x.score}/100 · ${x.strength} · ${x.reason}<div class="forecastBar"><i class="${cls}" style="width:${Math.max(4,Math.min(100,x.score))}%"></i></div></span></div>`;
-  }).join('');
+  const el=$('forecastFeed');if(!el)return;
+  const tf=$('signalTf')?.value||S.tf, ms=tfMillis(tf), now=Date.now();
+  const last=S.c.at(-1);
+  const live=last && now>=Number(last.t) && now<Number(last.t)+ms;
+  const anchor=live?S.c.at(-2):last;
+  const next=anchor?SIGNALS.find(x=>x.symbol===S.symbol&&x.tf===tf&&Number(x.targetTs)===Number(anchor.t)+ms):null;
+  const rows=SIGNALS.filter(x=>x.symbol===S.symbol&&x.tf===tf&&x.status==='CLOSED').slice(0,12);
+  const nextHtml=next?`<div class="nextSignalCard"><div class="nextSignalTitle">NEXT CANDLE · ${signalTime(next.targetTs)}</div><div class="nextSignalMain"><b class="nextSide ${next.side==='BUY'?'buy':next.side==='SELL'?'sell':'wait'}">${next.side==='BUY'?'BUY ↑':next.side==='SELL'?'SELL ↓':'WAIT •'}</b><span>${next.score}/100 · ${next.strength}</span></div><div class="nextReason">${next.reason?.slice(0,3).map(x=>'• '+x).join('<br>')||'Struktur belum cukup dominan.'}</div></div>`:'<div class="note">Menunggu candle close untuk membekukan prediksi candle berikutnya…</div>';
+  const historyHtml=rows.length?`<div class="historyTitle">HASIL SIGNAL DROP</div>`+rows.map(x=>`<div class="resultRow"><span>${signalTime(x.targetTs)}</span><b class="${x.side==='BUY'?'buy':x.side==='SELL'?'sell':'wait'}">${x.side}</b><span class="${x.outcome==='HIT'?'hit':x.outcome==='MISS'?'miss':'neutral'}">${x.outcome==='HIT'?'✓ HIT':x.outcome==='MISS'?'✕ MISS':'• NETRAL'}</span></div>`).join(''):'<div class="note">Belum ada hasil evaluasi.</div>';
+  el.innerHTML=nextHtml+historyHtml;
 }
-function signalOutcomeForCandle(side,c,signalClose,atr){
-  if(!c||side==='WAIT')return {status:'SKIP',label:'WAIT'};
-  const close=Number(c.c), base=Number(signalClose||0), a=Math.max(Number(atr||0),Math.abs(Number(c.c)-Number(c.o)),1e-12);
-  if(!(base>0))return {status:'NEUTRAL',label:'NETRAL'};
-  const delta=close-base, threshold=a*0.05;
-  if(Math.abs(delta)<=threshold)return {status:'NEUTRAL',label:'NETRAL'};
-  const actual=delta>0?'BUY':'SELL';
-  return actual===side?{status:'HIT',label:'✓ HIT'}:{status:'MISS',label:'× MISS'};
+function actualCandleSide(c){
+  if(!c)return 'NEUTRAL';
+  const body=Number(c.c)-Number(c.o), range=Math.max(1e-12,Number(c.h)-Number(c.l));
+  if(Math.abs(body)<=range*0.08)return 'NEUTRAL';
+  return body>0?'BUY':'SELL';
 }
-function signalAccuracy(rows){
-  const done=rows.filter(x=>x.outcome==='HIT'||x.outcome==='MISS');
-  const hits=done.filter(x=>x.outcome==='HIT').length;
-  return {done:hits+done.filter(x=>x.outcome==='MISS').length,hits,accuracy:done.length?hits/done.length*100:null};
+function outcomeForPrediction(pred,actual){
+  if(!pred||pred==='WAIT'||actual==='NEUTRAL')return 'NEUTRAL';
+  return pred===actual?'HIT':'MISS';
 }
 function renderSignalDrop(){
-  const el=$('signalFeed');if(!el)return;
+  const el=$('signalFeed');
+  if(!el)return;
   const tf=$('signalTf')?.value||S.tf;
   const rows=SIGNALS.filter(x=>x.symbol===S.symbol&&x.tf===tf).slice(0,80);
-  const acc=signalAccuracy(rows);
-  $('signalCount').textContent=acc.accuracy==null?`${rows.length} sinyal`:`${rows.length} sinyal · akurasi ${acc.accuracy.toFixed(0)}% (${acc.hits}/${acc.done})`;
+  const done=rows.filter(x=>x.status&&x.status!=='PENDING');
+  const hit=done.filter(x=>x.outcome==='HIT').length, miss=done.filter(x=>x.outcome==='MISS').length;
+  const rate=hit+miss?Math.round(hit/(hit+miss)*100):null;
+  $('signalCount').textContent=`${rows.length} sinyal${rate!=null?' · '+rate+'% HIT':''}`;
   el.innerHTML=rows.length?rows.map(x=>{
     const b=x.side==='BUY',s=x.side==='SELL',label=b?'B':s?'S':'W',cls=b?'good':s?'bad':'wait',arrow=b?'↑':s?'↓':'•';
-    const outcome=x.outcome==='HIT'?'good':x.outcome==='MISS'?'bad':'wait';
-    return `<div class="signalRow"><span class="signalTime">${signalTime(x.ts)}</span><span class="signalSide ${cls}">${label} <span class="signalArrow">${arrow}</span></span><span class="signalMeta">${x.score}/100 · ${x.strength} · <b class="${outcome}">${x.outcomeLabel||'MENUNGGU'}</b><br>${x.predictedAt||''}<br>${x.reason?.[0]||x.context||''}</span></div>`
-  }).join(''):'<div class="note">Belum ada sinyal candle-close. Signal Drop sekarang dikunci setelah candle selesai agar tidak berubah-ubah selama candle berjalan.</div>';
+    const out=x.outcome==='HIT'?'✓ HIT':x.outcome==='MISS'?'✕ MISS':x.outcome==='NEUTRAL'?'• NETRAL':'… PENDING';
+    const outCls=x.outcome==='HIT'?'good':x.outcome==='MISS'?'bad':'wait';
+    return `<div class="signalRow"><span class="signalTime">${signalTime(x.targetTs||x.ts)}</span><span class="signalSide ${cls}">${label} <span class="signalArrow">${arrow}</span></span><span class="signalMeta">${x.score}/100 · ${x.strength} · ${out}<br>${x.predictedAt||''}</span></div>`
+  }).join(''):'<div class="note">Belum ada prediksi yang dibekukan. Menunggu candle close.</div>';
   renderFutureForecast();
 }
 function persistSignals(){try{localStorage.setItem(SIGNAL_KEY,JSON.stringify(SIGNALS.slice(0,300)))}catch{}}
-function evaluatePreviousSignal(c){
-  if(!c)return;
-  const target=SIGNALS.find(x=>x.symbol===S.symbol&&x.tf===S.tf&&x.targetTs===Number(c.t)&&!x.outcome);
-  if(!target)return;
-  const r=signalOutcomeForCandle(target.side,c,target.signalClose,target.atr);
-  target.outcome=r.status;target.outcomeLabel=r.label;target.actualOpen=Number(c.o);target.actualClose=Number(c.c);target.evaluatedTs=Date.now();
-}
-function recordPredictionFromClosed(c){
-  if(!c||S.c.length<40)return;
-  evaluatePreviousSignal(c);
-  const closed=S.c.slice(0,-1);
-  const t=nextCandleForecast(S.c);
-  const targetTs=Number(c.t)+tfMillis(S.tf);
-  const key=`${S.symbol}:${S.tf}:${Number(c.t)}`;
-  if(SIGNALS.some(x=>x.key===key)) { persistSignals();renderSignalDrop();return; }
+function freezeNextCandlePrediction(anchor){
+  if(!anchor||S.c.length<36)return null;
+  const tf=$('signalTf')?.value||S.tf, ms=tfMillis(tf);
+  const targetTs=Number(anchor.t)+ms;
+  const closed=S.c.filter(x=>Number(x.t)<=Number(anchor.t));
+  if(closed.length<35)return null;
+  const t=predictiveCandle(closed);
+  const key=`${S.symbol}:${tf}:${targetTs}`;
   const row={
-    key,ts:Number(c.t),symbol:S.symbol,tf:S.tf,side:t.side,score:t.score,confidence:t.confidence,strength:t.strength,
-    reason:t.reason,context:t.sr?.context||'NO_LEVEL',support:t.sr?.support,resistance:t.sr?.resistance,
-    source:'NEXT_CANDLE_ENSEMBLE',targetTs,signalClose:Number(c.c),atr:Number(t.atr||0),
-    predictedAt:`Prediksi candle berikutnya · ${new Date(targetTs).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})} WIB`,
-    outcome:null,outcomeLabel:'MENUNGGU'
+    key,ts:Number(anchor.t),anchorTs:Number(anchor.t),targetTs,symbol:S.symbol,tf,
+    side:t.side,score:t.score,strength:t.strength,reason:t.reason,
+    context:t.sr?.context||'NO_LEVEL',support:t.sr?.support,resistance:t.sr?.resistance,
+    predictedAt:`Dibekukan saat close ${signalTime(anchor.t)}`,
+    status:'PENDING',outcome:null,actual:null,actualOpen:null,actualClose:null,actualMovePct:null
   };
-  SIGNALS.unshift(row);lastSignalSlot=Number(c.t);lastSignalSide=t.side;SIGNALS=SIGNALS.slice(0,300);persistSignals();renderSignalDrop();
+  const idx=SIGNALS.findIndex(x=>x.key===key);
+  if(idx>=0)return SIGNALS[idx];
+  SIGNALS.unshift(row);SIGNALS=SIGNALS.slice(0,300);persistSignals();return row;
 }
-function recordClosedSignal(c){if(!c)return;recordPredictionFromClosed(c)}
-function refreshSignalFromCurrent(){renderSignalDrop()}
-function scheduleLivePrediction(){renderSignalDrop()}
+function evaluateClosedCandle(c){
+  if(!c)return;
+  const tf=$('signalTf')?.value||S.tf, targetTs=Number(c.t);
+  const idx=SIGNALS.findIndex(x=>x.symbol===S.symbol&&x.tf===tf&&Number(x.targetTs)===targetTs&&x.status==='PENDING');
+  if(idx<0)return;
+  const row=SIGNALS[idx], actual=actualCandleSide(c), outcome=outcomeForPrediction(row.side,actual);
+  const movePct=((Number(c.c)-Number(c.o))/Math.max(1e-12,Number(c.o)))*100;
+  SIGNALS[idx]={...row,status:'CLOSED',outcome,actual,actualOpen:Number(c.o),actualClose:Number(c.c),actualMovePct:movePct,evaluatedAt:Date.now()};
+  persistSignals();
+}
+function recordPredictionSignal(){
+  // IMPORTANT: Signal Drop is frozen at candle close. It never rewrites an old
+  // prediction when the live candle moves, so HIT/MISS remains auditable.
+  if(S.c.length<36)return;
+  const last=S.c.at(-1);
+  const now=Date.now();
+  const liveIsCurrent=last && now>=Number(last.t) && now<Number(last.t)+tfMillis(S.tf);
+  const anchor=liveIsCurrent?S.c.at(-2):last;
+  if(anchor)freezeNextCandlePrediction(anchor);
+  renderSignalDrop();
+}
+function recordClosedSignal(c){
+  if(!c)return;
+  evaluateClosedCandle(c);
+  freezeNextCandlePrediction(c);
+  renderSignalDrop();
+}
+function refreshSignalFromCurrent(){recordPredictionSignal()}
+function scheduleLivePrediction(){/* Frozen Signal Drop: no realtime rewriting. */}
 function mtf(){let tfs=['1m','5m','15m','1h','4h'];Promise.all(tfs.map(tf=>jsonFetch(`/api/klines?symbol=${S.symbol}&interval=${tf}&limit=180`).then(d=>({tf,c:(d||[]).map(x=>({o:+x[1],h:+x[2],l:+x[3],c:+x[4]}))})))).then(rows=>{S.mtf={};rows.forEach(x=>{let a=x.c.map(z=>z.c),r=RSI(a).at(-1),e20=EMA(a,20).at(-1),e50=EMA(a,50).at(-1),ad=ADX(x.c).at(-1),dir=e20>e50?'BULL':'BEAR';S.mtf[x.tf]={dir,r,ad};});render('confluence')}).catch(()=>{})}
 async function order(side){
   if(AUTO_ENTRY!==false && !window.__manualOrderClick)return;
   if(S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0)return alert(`Masih ada posisi Binance ${Number(S.accountPosition.positionAmt)>0?'LONG':'SHORT'} ${Math.abs(Number(S.accountPosition.positionAmt)).toFixed(6)} BTC. Tutup posisi aktif dulu.`);
   const g=entryGuard(side);if(!g.ok){alert(g.reason);return}
-  if(g.warning&&window.__manualOrderClick){console.info(g.warning)}
   const z=S.smart?.[side.toLowerCase()];if(!z)return alert('SL/TP belum siap');
   const entryType=String($('entryType')?.value||'MARKET').toUpperCase();
   const chosenUSDT=entryType==='LIMIT'?toUSDT(Number($('entryPrice')?.value||0)):Number(S.c.at(-1)?.c||0);
@@ -682,7 +593,7 @@ Lanjut entry?`;
 function fmtIDRNumber(usdt){return Number(usdt||0)*USDT_IDR_RATE}
 function fromUSDT(usdt){return Number(usdt||0)*USDT_IDR_RATE}
 function render(tab){let el=$('content');
-if(tab==='confluence')el.innerHTML=`<div class="aiCard"><div><span class="label">FINAL SIGNAL · UNIFIED</span><div id="aiSignal" class="signal wait">WAIT</div><div id="aiScore" class="note">0/100 · LOW</div></div><div class="aiReasons"><div class="label">ALASAN</div><div id="aiReason" class="note">Menunggu data candle…</div><div id="predictBox" class="predictBox note">S/R: —</div></div></div><div class="srCard"><div class="label">SUPPORT / RESISTANCE</div><div class="srLevels"><div class="srLevel"><span class="note">SUPPORT</span><b id="srSupport">—</b></div><div class="srLevel"><span class="note">RESISTANCE</span><b id="srResistance">—</b></div></div><div id="srContext" class="note" style="margin-top:7px">Belum ada level.</div></div><table class="table"><tr><th>TF</th><th>Trend</th><th>RSI</th><th>ADX</th></tr>${Object.entries(S.mtf).map(([k,v])=>`<tr><td>${k}</td><td class="${v.dir==='BULL'?'good':'bad'}">${v.dir}</td><td>${fmt(v.r)}</td><td>${fmt(v.ad)}</td></tr>`).join('')}</table><div class="note">FINAL SIGNAL memakai satu mesin keputusan untuk panel utama, live, dan Signal Drop. MTF tetap ditampilkan sebagai konteks; proyeksi masa depan dipisahkan dari sinyal saat ini.</div>`;
+if(tab==='confluence')el.innerHTML=`<div class="aiCard"><div><span class="label">AI CANDLE TREND</span><div id="aiSignal" class="signal wait">WAIT</div><div id="aiScore" class="note">0/100 · LOW</div></div><div class="aiReasons"><div class="label">ALASAN</div><div id="aiReason" class="note">Menunggu data candle…</div><div id="predictBox" class="predictBox note">S/R: —</div></div></div><div class="srCard"><div class="label">SUPPORT / RESISTANCE</div><div class="srLevels"><div class="srLevel"><span class="note">SUPPORT</span><b id="srSupport">—</b></div><div class="srLevel"><span class="note">RESISTANCE</span><b id="srResistance">—</b></div></div><div id="srContext" class="note" style="margin-top:7px">Belum ada level.</div></div><table class="table"><tr><th>TF</th><th>Trend</th><th>RSI</th><th>ADX</th></tr>${Object.entries(S.mtf).map(([k,v])=>`<tr><td>${k}</td><td class="${v.dir==='BULL'?'good':'bad'}">${v.dir}</td><td>${fmt(v.r)}</td><td>${fmt(v.ad)}</td></tr>`).join('')}</table><div class="note">AI membaca rangkaian candle + momentum + struktur. BUY/SELL adalah sinyal informasi; WAIT dipakai saat arah tidak dominan.</div>`;
 else if(tab==='backtest')el.innerHTML=`<div class="g3"><label class="field">Fast<input id="bf" value="20"></label><label class="field">Slow<input id="bs" value="50"></label><label class="field">Fee %/side<input id="fee" value=".04"></label></div><div class="g3" style="margin-top:7px"><label class="field">Slippage %<input id="slip" value=".02"></label><label class="field">Funding %/8h<input id="fund" value=".01"></label><label class="field">Risk %<input id="brisk" value="1"></label></div><button class="btn" style="margin-top:8px" id="runbt">Run backtest</button><div id="bout" class="note" style="margin-top:8px"></div>`;
 else if(tab==='journal')jsonFetch('/api/journal',{headers:H()}).then(rows=>{el.innerHTML=rows.length?`<table class="table"><tr><th>Time</th><th>Symbol</th><th>Side</th><th>PnL</th><th>Fee</th><th>Funding</th></tr>${rows.map(x=>`<tr><td>${new Date(x.opened_at).toLocaleString()}</td><td>${x.symbol}</td><td>${x.side}</td><td class="${x.pnl>=0?'good':'bad'}">${fmt(x.pnl)}</td><td>${fmt(x.fee)}</td><td>${fmt(x.funding)}</td></tr>`).join('')}</table>`:'<div class="note">Journal kosong.</div>'});
 else jsonFetch('/api/audit',{headers:H()}).then(rows=>el.innerHTML=`<div class="scroll"><table class="table"><tr><th>Time</th><th>Action</th><th>Detail</th></tr>${rows.map(x=>`<tr><td>${new Date(x.created_at).toLocaleTimeString()}</td><td>${x.action}</td><td>${String(x.detail).slice(0,120)}</td></tr>`).join('')}</table></div>`);
@@ -756,7 +667,7 @@ document.getElementById('signalTf')?.addEventListener('change',()=>renderSignalD
 document.getElementById('clearSignals')?.addEventListener('click',()=>{if(!confirm('Hapus riwayat Signal Drop untuk pair ini?'))return;SIGNALS=SIGNALS.filter(x=>x.symbol!==S.symbol);persistSignals();renderSignalDrop()});
 renderSignalDrop();
 ensureAuth();
-Promise.all([jsonFetch('/api/health'),jsonFetch('/api/runtime')]).then(([x,rt])=>{updateModeUI(rt);S.kill=!!x.killSwitch;$('kill').textContent=S.kill?'KILL ON':'KILL'}).catch(e=>{$('conn').textContent='API ERROR';$('conn').title=e.message});render();resize();load();setTimeout(()=>{resize();safeDraw()},250);setInterval(updateAITrend,1500);setInterval(updateLiveSignal,500);setInterval(updateTradeAlert,1000);setInterval(()=>{renderFutureForecast()},1000);setInterval(scheduleLivePrediction,5000);oiTimer=setInterval(depth,3000);accountTimer=setInterval(refreshAccount,1000);
+Promise.all([jsonFetch('/api/health'),jsonFetch('/api/runtime')]).then(([x,rt])=>{updateModeUI(rt);S.kill=!!x.killSwitch;$('kill').textContent=S.kill?'KILL ON':'KILL'}).catch(e=>{$('conn').textContent='API ERROR';$('conn').title=e.message});render();resize();load();setTimeout(()=>{resize();safeDraw()},250);setInterval(updateAITrend,1500);setInterval(updateLiveSignal,500);setInterval(()=>{renderFutureForecast()},1000);setInterval(scheduleLivePrediction,5000);oiTimer=setInterval(depth,3000);accountTimer=setInterval(refreshAccount,1000);
 
 
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstallPrompt=e;const b=$('installPwa');if(b){b.style.display='inline-block';b.classList.add('pwaInstall')}});

@@ -1,17 +1,19 @@
-# Obsidian Futures v5.34 — Unified Signal + Precision + Live Confirmation + Calibrated Signal Drop
+# Obsidian Futures v5.34.1 — Signal Drop v3
 
-## Signal Drop changes
-- Signal Drop is now **candle-close locked**: it no longer rewrites the same signal repeatedly while a candle is forming.
-- The prediction is calculated from the **closed candle structure** and stored as the forecast for the next candle.
-- Each stored prediction is evaluated when its target candle closes as `HIT`, `MISS`, or `NETRAL`.
-- The Signal Drop header shows observed accuracy from completed BUY/SELL predictions.
-- WebSocket and polling paths both record a signal when a new candle is detected.
-- Live entry protection remains separate from Signal Drop, so a noisy live tick cannot rewrite historical predictions.
+Patch focused on making **Signal Drop** an auditable next-candle predictor instead of a live, constantly changing forecast.
+
+## Signal Drop v3 changes
+- Prediction is **frozen when the reference candle closes**.
+- The prediction is assigned to exactly **one next candle** using `targetTs`.
+- When that next candle closes, the app evaluates it as `HIT`, `MISS`, or `NETRAL`.
+- Historical predictions are never rewritten by later ticks.
+- Live candle movement can still update the separate **ARAH ENTRY LIVE** panel, but it does not rewrite Signal Drop history.
+- Signal Drop shows a compact **NEXT CANDLE** card plus an auditable result history.
+- HIT rate is calculated only from closed BUY/SELL predictions; WAIT and doji-like neutral candles are not counted as hits or misses.
+- Local storage key is migrated to `obsidian_signal_drop_v3`, so old mutable Signal Drop rows are not mixed with the new audit history.
 
 ## Important
-"Accuracy" is an observed historical hit rate for the selected symbol/timeframe and is not a guarantee of future profit. A WAIT prediction is not counted as a directional hit/miss.
+This is a measurement and prediction architecture, not a guarantee of future price direction. A high historical HIT rate does not guarantee future performance.
 
-## Existing fixes retained
-- Unified current-signal engine.
-- Three-sample live direction confirmation.
-- Binance price/quantity precision handling.
+## Deploy
+Replace the previous package with this ZIP. Keep the existing Binance credentials and trading-mode environment variables.
