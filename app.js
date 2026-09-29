@@ -143,10 +143,10 @@ function hybridPredictiveCandle(closed, live){
   bull=Math.max(0,Math.min(100,bull)); bear=Math.max(0,Math.min(100,bear));
   const gap=Math.abs(bull-bear),score=Math.max(bull,bear);
   let side='WAIT';
-  const twoSidedConflict = bull>=45 && bear>=45 && gap<10;
-  if(!twoSidedConflict && bull>=54&&gap>=8)side='BUY';
-  else if(!twoSidedConflict && bear>=54&&gap>=8)side='SELL';
-  else reason.push(twoSidedConflict?'Realtime conflict → WAIT':'Realtime belum cukup dominan');
+  const twoSidedConflict = bull>=48 && bear>=48 && gap<5;
+  if(!twoSidedConflict && bull>=50&&gap>=4)side='BUY';
+  else if(!twoSidedConflict && bear>=50&&gap>=4)side='SELL';
+  else reason.push(twoSidedConflict?'Realtime conflict → WAIT':'Skor di bawah threshold 50 atau gap < 4 → WAIT');
   return {...base,side,score,bull,bear,gap,reason:reason.slice(-8),strength:score>=78?'HIGH':score>=62?'MEDIUM':'LOW'};
 }
 function updateLiveSignal(){if(!S.c.length)return;const c=S.c.at(-1),closed=S.c.length>1?S.c.slice(0,-1):S.c,t=hybridPredictiveCandle(closed,c);const dir=c.c>c.o?'NAIK · B':c.c<c.o?'TURUN · S':'DATAR';const box=$('liveSignalBox'),sig=$('liveEntrySignal'),score=$('liveSignalScore'),cd=$('candleCountdown'),ct=$('candleTime'),clock=$('liveClock'),cdir=$('liveCandleDirection'),cprice=$('liveCandlePrice'),ls=$('signalLiveSide'),lm=$('signalLiveMeta');if(sig){sig.textContent=t.side==='BUY'?'B':t.side==='SELL'?'S':'WAIT';sig.className='signal '+(t.side==='BUY'?'good':t.side==='SELL'?'bad':'wait')}if(score)score.textContent=`${t.score||0}/100 · ${t.strength||'LOW'} · ${t.reason?.[0]||'Membaca sumbu dan momentum'}`;if(box)box.className='liveBox '+(t.side==='BUY'?'signalBuy':t.side==='SELL'?'signalSell':'signalWait');if(cdir){cdir.textContent=dir;cdir.className=''+(dir.startsWith('NAIK')?'good':dir.startsWith('TURUN')?'bad':'wait')}if(cprice)cprice.textContent=`${fmtIDR(c.c)} · Buka ${fmtIDR(c.o)}`;const ms=tfMillis(S.tf),remain=Math.max(0,(c.t+ms)-Date.now()),sec=Math.floor(remain/1000),mm=String(Math.floor(sec/60)).padStart(2,'0'),ss=String(sec%60).padStart(2,'0');if(cd)cd.textContent=`${mm}:${ss}`;if(ct)ct.textContent=`Candle ${new Date(c.t).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})}–${new Date(c.t+ms).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})} WIB`;if(clock)clock.textContent=new Date().toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit',second:'2-digit'});if(ls){ls.textContent=t.side==='BUY'?'B ↑':t.side==='SELL'?'S ↓':'WAIT •';ls.className='signalSide '+(t.side==='BUY'?'good':t.side==='SELL'?'bad':'wait')}if(lm)lm.textContent=`${t.score||0}/100 · ${dir} · close ${mm}:${ss}`;AI_TREND=t; updateEntryButtons()}
@@ -260,10 +260,13 @@ function predictiveCandle(c){
   // strict that normal market structure becomes WAIT almost everywhere.
   // If both sides have meaningful evidence and are close, keep WAIT.
   let side='WAIT';
-  const twoSidedConflict = bull>=45 && bear>=45 && gap<9;
-  if(!twoSidedConflict && bull>=52 && gap>=7)side='BUY';
-  else if(!twoSidedConflict && bear>=52 && gap>=7)side='SELL';
-  else reason.push(twoSidedConflict?'Konflik bullish/bearish → WAIT':'Bukti belum cukup kuat → WAIT');
+  const twoSidedConflict = bull>=48 && bear>=48 && gap<5;
+  // Anti-stuck threshold: a clear leader at 50+ with a small directional
+  // edge is enough to emit BUY/SELL. WAIT is reserved for genuinely balanced
+  // evidence rather than every imperfect indicator combination.
+  if(!twoSidedConflict && bull>=50 && gap>=4)side='BUY';
+  else if(!twoSidedConflict && bear>=50 && gap>=4)side='SELL';
+  else reason.push(twoSidedConflict?'Konflik bullish/bearish → WAIT':'Skor di bawah threshold 50 atau gap < 4 → WAIT');
 
   return {
     side,score,bull,bear,gap,mtfBull,mtfBear,
@@ -302,9 +305,9 @@ function aiCandleTrend(c){
   if(ll){bear+=15;reason.push('Break recent low / lower-low')}
   const total=bull+bear;
   let side='WAIT',score=Math.max(bull,bear);
-  if(bull>=60&&bull-bear>=15)side='BUY';
-  else if(bear>=60&&bear-bull>=15)side='SELL';
-  else {score=Math.max(bull,bear);reason.push('Arah belum cukup dominan → WAIT')}
+  if(bull>=55&&bull-bear>=8)side='BUY';
+  else if(bear>=55&&bear-bull>=8)side='SELL';
+  else {score=Math.max(bull,bear);reason.push('Skor di bawah threshold 55 atau selisih < 8 → WAIT')}
   return {side,score,bull,bear,reason,strength:score>=75?'HIGH':score>=60?'MEDIUM':'LOW'};
 }
 function updateAITrend(){
@@ -437,18 +440,18 @@ function projectFutureSignals(){
     const gap=Math.abs(bull-bear),score=Math.max(bull,bear);
     let side='WAIT';
 
-    const twoSidedConflict = bull>=45 && bear>=45 && gap<9;
-    if(!srConflict&&!twoSidedConflict&&bull>=52&&gap>=7)side='BUY';
-    else if(!srConflict&&!twoSidedConflict&&bear>=52&&gap>=7)side='SELL';
-    else if(srConflict&&!twoSidedConflict&&bull>=62&&gap>=10)side='BUY';
-    else if(srConflict&&!twoSidedConflict&&bear>=62&&gap>=10)side='SELL';
+    const twoSidedConflict = bull>=48 && bear>=48 && gap<5;
+    if(!srConflict&&!twoSidedConflict&&bull>=50&&gap>=4)side='BUY';
+    else if(!srConflict&&!twoSidedConflict&&bear>=50&&gap>=4)side='SELL';
+    else if(srConflict&&!twoSidedConflict&&bull>=55&&gap>=6)side='BUY';
+    else if(srConflict&&!twoSidedConflict&&bear>=55&&gap>=6)side='SELL';
 
     const strength=score>=78?'HIGH':score>=62?'MEDIUM':'LOW';
     const reason=side==='BUY'
       ? (srConflict?'support/breakout + projected path':h<=2?'next-candle momentum + structure':'projected bullish path')
       : side==='SELL'
         ? (srConflict?'resistance/rejection + projected path':h<=2?'next-candle momentum + structure':'projected bearish path')
-        : (srConflict?'S/R conflict → WAIT':'candle projection conflict → WAIT');
+        : (srConflict?'S/R conflict → WAIT':'Skor di bawah threshold 50 atau gap < 4 → WAIT');
 
     const ts=Math.floor((last.t+ms*h)/ms)*ms;
     out.push({ts,side,score,strength,horizon:h,reason,virtual,bull,bear,gap});
