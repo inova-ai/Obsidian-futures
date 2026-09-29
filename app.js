@@ -655,8 +655,9 @@ cv.addEventListener('pointerdown',e=>{let r=cv.getBoundingClientRect(),x=e.clien
 cv.addEventListener('pointermove',e=>{if(!S.drag)return;let r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top,{a,dx,py}=priceMap(),i=clamp(Math.round((x-45)/dx),0,a.length-1);if(S.drag.type==='trend'){S.drag.x2=x;S.drag.y2=y}else S.drag.b=a[i]?.c||S.drag.b;draw()});
 cv.addEventListener('pointerup',()=>{S.drag=null});
 $('entryGuard')?.addEventListener('change',e=>{ENTRY_GUARD=e.target.checked;updateEntryButtons()});
-$('autoTrade')?.addEventListener('change',e=>{AUTO_ENTRY=!!e.target.checked;localStorage.setItem('obsidian_auto_trade',AUTO_ENTRY?'1':'0');if(AUTO_ENTRY){setAutoStatus('AUTO TRADE AKTIF · menunggu candle close + sinyal kuat','good')}else setAutoStatus('AUTO TRADE MATI · order hanya manual','wait');updateEntryButtons()});
-setTimeout(()=>{const a=$('autoTrade');if(a)a.checked=AUTO_ENTRY;setAutoStatus(AUTO_ENTRY?'AUTO TRADE AKTIF · menunggu sinyal kuat':'AUTO TRADE MATI · order hanya manual',AUTO_ENTRY?'good':'wait')},0);
+function syncAutoTradeUI(){const b=$('autoTradeBtn');if(b){b.textContent=AUTO_ENTRY?'AUTO: ON':'AUTO: OFF';b.className='btn '+(AUTO_ENTRY?'long':'');b.setAttribute('aria-pressed',AUTO_ENTRY?'true':'false');}setAutoStatus(AUTO_ENTRY?'AUTO TRADE AKTIF · menunggu candle close + sinyal kuat':'AUTO TRADE MATI · order hanya manual',AUTO_ENTRY?'good':'wait');}
+$('autoTradeBtn')?.addEventListener('click',()=>{AUTO_ENTRY=!AUTO_ENTRY;localStorage.setItem('obsidian_auto_trade',AUTO_ENTRY?'1':'0');syncAutoTradeUI();updateEntryButtons()});
+setTimeout(syncAutoTradeUI,0);
 async function closePosition(opts={}){
   if(!opts.silent&&!confirm(`Tutup posisi ${S.symbol} sekarang pada harga market?\nIni akan menutup posisi yang sedang terbuka.`))return;
   const rt=await jsonFetch('/api/runtime').catch(e=>({error:e.message}));if(rt.error)return alert(rt.error);
