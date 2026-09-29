@@ -20,8 +20,8 @@ let deferredInstallPrompt=null;
 let lastLivePriceTs=0;
 function scheduleDraw(){if(drawRAF)return;drawRAF=requestAnimationFrame(()=>{drawRAF=0;safeDraw()})}
 function currentLiveSide(){const c=S.c.at(-1); if(!c)return 'WAIT'; const pred=AI_TREND?.side||'WAIT'; const candle=c.c>c.o?'BUY':c.c<c.o?'SELL':'WAIT'; if(pred!=='WAIT')return pred; return candle;}
-function entryGuard(side){if(MANUAL_ENTRY_STOP)return {ok:false,live:currentLiveSide(),reason:'STOP ENTRY aktif secara manual.'}; if(!ENTRY_GUARD)return {ok:true}; const live=currentLiveSide(); if(live!==side)return {ok:false,live,reason:live==='WAIT'?'Arah belum jelas (WAIT).':'Arah live berubah berlawanan.'}; return {ok:true,live};}
-function updateEntryButtons(){const live=currentLiveSide(); const stopped=MANUAL_ENTRY_STOP; const lb=$('long'),sb=$('short'),ql=$('quickLong'),qs=$('quickShort'); [lb,ql,sb,qs].forEach(b=>{if(b){b.disabled=stopped || (ENTRY_GUARD && ((b===lb||b===ql)?live!=='BUY':live!=='SELL'));b.classList.toggle('entryStopped',b.disabled);b.title=b.disabled?(stopped?'STOP ENTRY aktif.':`Entry dihentikan: sinyal live ${live}.`):''}}); const st=$('entryGuardStatus'); if(st)st.textContent=stopped?'STOP ENTRY AKTIF · order baru dihentikan':(ENTRY_GUARD?`Perlindungan entry: AKTIF · Arah live ${live}`:'Perlindungan entry: MATI'); if(st)st.className='note '+(live==='BUY'?'good':live==='SELL'?'bad':'wait');}
+function entryGuard(side){if(MANUAL_ENTRY_STOP)return {ok:false,live:currentLiveSide(),reason:'STOP ENTRY aktif secara manual.'}; /* Manual BUY/SELL must never be blocked by WAIT or opposite live signal. ENTRY_GUARD is informational for manual trading; automatic entry remains disabled. */ return {ok:true,live:currentLiveSide()};}
+function updateEntryButtons(){const live=currentLiveSide(); const stopped=MANUAL_ENTRY_STOP; const lb=$('long'),sb=$('short'),ql=$('quickLong'),qs=$('quickShort'); [lb,ql,sb,qs].forEach(b=>{if(b){b.disabled=stopped;b.classList.toggle('entryStopped',b.disabled);b.title=b.disabled?'STOP ENTRY aktif.':'Manual BUY/SELL tetap tersedia meskipun sinyal AI WAIT.'}}); const st=$('entryGuardStatus'); if(st)st.textContent=stopped?'STOP ENTRY AKTIF · order baru dihentikan':`Manual entry tersedia · Sinyal AI ${live} hanya sebagai informasi`; if(st)st.className='note '+(live==='BUY'?'good':live==='SELL'?'bad':'wait');}
 
 
 let MARKET_WS_BASE='wss://fstream.binance.com';
@@ -493,7 +493,7 @@ function renderSignalDrop(){
     const b=x.side==='BUY',s=x.side==='SELL',label=b?'B':s?'S':'W',cls=b?'good':s?'bad':'wait',arrow=b?'↑':s?'↓':'•';
     const out=x.outcome==='HIT'?'✓ HIT':x.outcome==='MISS'?'✕ MISS':x.outcome==='NEUTRAL'?'• NETRAL':'… PENDING';
     const outCls=x.outcome==='HIT'?'good':x.outcome==='MISS'?'bad':'wait';
-    return `<div class="signalRow"><span class="signalTime">${signalTime(x.targetTs||x.ts)}</span><span class="signalSide ${cls}">${label} <span class="signalArrow">${arrow}</span></span><span class="signalMeta">${x.score}/100 · ${x.strength} · ${out}<br>${x.predictedAt||''}</span></div>`
+    return `<div class="signalRow"><div class="signalTop"><span class="signalTime">CLOSE ${signalTime(x.anchorTs||x.ts)} → NEXT ${signalTime(x.targetTs||x.ts)}</span><span class="signalSide ${cls}">${label} <span class="signalArrow">${arrow}</span></span></div><div class="signalMeta">Score ${x.score}/100 · ${x.strength} · ${out}${x.actual?` · Aktual: ${x.actual}`:''}</div></div>`
   }).join(''):'<div class="note">Belum ada prediksi yang dibekukan. Menunggu candle close.</div>';
   renderFutureForecast();
 }

@@ -17,3 +17,11 @@ This is a measurement and prediction architecture, not a guarantee of future pri
 
 ## Deploy
 Replace the previous package with this ZIP. Keep the existing Binance credentials and trading-mode environment variables.
+
+
+## Signal Drop / Entry Fix
+- Manual BUY/SELL is no longer blocked by AI WAIT or opposite live signal.
+- Only the explicit STOP ENTRY control can block a manual order (plus existing open-position/validation checks).
+- Signal Drop now visibly shows CLOSE time -> NEXT candle time, score, strength, and evaluation result.
+- Historical predictions remain frozen and are evaluated only after the target candle closes.
+- This does not guarantee prediction accuracy or profit.
