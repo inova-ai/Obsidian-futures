@@ -1,6 +1,16 @@
-# Obsidian Futures v5.34.1 — Signal Drop v3
+# Obsidian Futures v5.36.0 — Realtime Market Sync
 
 Patch focused on making **Signal Drop** an auditable next-candle predictor instead of a live, constantly changing forecast.
+
+## Realtime market-sync patch (5.36.0)
+- Migrated Binance USDⓈ-M market WebSocket URLs to the current `/market` and `/public` routing. Binance retired the legacy WebSocket routing in 2026.
+- Candles now use direct Binance WebSocket market data as the primary source instead of a 1-second REST request that could overwrite newer ticks.
+- `aggTrade` updates the live candle immediately; kline updates remain the canonical OHLC/volume stream.
+- REST is now only a fallback when the market WebSocket is disconnected. When WebSocket reconnects, REST polling stops.
+- `bookTicker` and `depth@100ms` use the public WebSocket. Depth updates are sequence-checked against the REST snapshot instead of being blindly overwritten every 3 seconds.
+- Open interest remains a periodic REST value because it is not a tick stream in this UI.
+- Account/position reconciliation remains a 1-second REST safety refresh; market price, mark price, funding, candle and order-book data no longer depend on that polling loop.
+- Added a local `npm start` entrypoint and a comprehensive syntax check.
 
 ## Signal Drop v3 changes
 - Prediction is **frozen when the reference candle closes**.
