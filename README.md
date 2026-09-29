@@ -64,3 +64,9 @@ Replace the previous package with this ZIP. Keep the existing Binance credential
 - AUTO sekarang bisa mengambil pending signal yang sudah terbentuk saat halaman baru dibuka/reload, selama signal masih berlaku untuk candle berjalan.
 - Kunci `lastAutoSignalKey` baru disimpan setelah posisi benar-benar terdeteksi di Binance. Jika order gagal/transient, AUTO mencoba lagi dengan jeda 5 detik.
 - Tidak mengubah aturan sinyal, cut loss Rp700, profit protection, atau realtime market data.
+
+## v5.38.2 — Entry/Position Reconciliation Fix
+- AUTO/manual entry is only considered successful when Binance `positionRisk` reports a non-zero position.
+- An order response with `executedQty` but no active position is no longer treated as a synthetic position.
+- Entry failures remain visible in the UI for 12 seconds instead of being immediately overwritten by the 1-second account refresh.
+- AUTO status explicitly reports `BINANCE POSITION TERDETEKSI` on a confirmed entry and keeps failed entries retryable when the signal remains valid.
