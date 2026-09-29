@@ -354,8 +354,17 @@ app.post('/api/live/order',auth,async(qr,r)=>{try{
     await new Promise(resolve=>setTimeout(resolve,250));
   }
   const executedQty=Number(actualOrder?.executedQty||entry.executedQty||0);
-  const actualQty=actualPosition?Math.abs(Number(actualPosition.positionAmt)):executedQty;
-  const actualEntry=actualPosition?Number(actualPosition.entryPrice):Number(actualOrder?.avgPrice||entry.avgPrice||roundedEntry);
+  // A successful exchange response is not enough: for a MARKET entry we must
+  // verify that Binance actually created the intended position. Never report a
+  // synthetic position from executedQty alone.
+  if(!actualPosition){
+    try{await cancelSymbolAlgoOrders(s)}catch{}
+    try{await cancelSymbolRegularOrders(s)}catch{}
+    const st=String(actualOrder?.status||entry.status||'UNKNOWN').toUpperCase();
+    throw Object.assign(new Error(`ORDER ${side} ${st}, tetapi posisi Binance belum aktif. Entry tidak dianggap berhasil. Cek Order History/Account Update sebelum retry.`),{code:'ENTRY_NOT_ACTIVE'});
+  }
+  const actualQty=Math.abs(Number(actualPosition.positionAmt));
+  const actualEntry=Number(actualPosition.entryPrice||actualOrder?.avgPrice||entry.avgPrice||roundedEntry);
   const actualNotional=actualQty*actualEntry;
   const qtyDelta=actualQty-qty;
   const actualQtyTolerance=Math.max(Number(lot?.stepSize||0.001),Math.abs(qty)*0.00001);
