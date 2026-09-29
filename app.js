@@ -11,7 +11,8 @@ const SIGNAL_KEY='obsidian_signal_drop_v3';
 let AUTO_ENTRY=localStorage.getItem('obsidian_auto_trade')==='1';
 let AUTO_CONFIRM_SCORE=70;
 let AUTO_CONFIRM_GAP=10;
-let lastAutoSignalKey=null;
+let lastAutoSignalKey=localStorage.getItem('obsidian_auto_last_signal')||null;
+let AUTO_COOLDOWN_UNTIL=Number(localStorage.getItem('obsidian_auto_cooldown')||0);
 let autoBusy=false;
 let AUTO_PROFIT_ARM_IDR=5000;
 let AUTO_PROFIT_GIVEBACK_PCT=10;
@@ -618,7 +619,7 @@ function recordClosedSignal(c){
   if(row) scheduleAutoTrade(row);
 }
 async function scheduleAutoTrade(row){
-  if(!AUTO_ENTRY||MANUAL_ENTRY_STOP||autoBusy||!row)return;
+  if(!AUTO_ENTRY||MANUAL_ENTRY_STOP||autoBusy||autoProtectBusy||!row)return;
   if(row.side==='WAIT')return;
   if(Number(row.score||0)<AUTO_CONFIRM_SCORE)return;
   const gap=Number(row.gap||0);
@@ -626,16 +627,23 @@ async function scheduleAutoTrade(row){
   const prev=SIGNALS.find(x=>x.symbol===row.symbol&&x.tf===row.tf&&Number(x.anchorTs)===Number(row.anchorTs)-tfMillis(row.tf));
   if(!prev||prev.side!==row.side||Number(prev.score||0)<AUTO_CONFIRM_SCORE||Number(prev.gap||0)<AUTO_CONFIRM_GAP){setAutoStatus(`AUTO: ${row.side} belum terkonfirmasi 2 candle · tunggu`, 'wait');return;}
   if(lastAutoSignalKey===row.key)return;
+  if(Date.now()<AUTO_COOLDOWN_UNTIL){setAutoStatus('AUTO: jeda pengaman setelah perubahan posisi · menunggu candle berikutnya','wait');return;}
   lastAutoSignalKey=row.key;
+  try{localStorage.setItem('obsidian_auto_last_signal',row.key)}catch{}
   autoBusy=true;
   try{
     await refreshAccount();
     const p=S.accountPosition, current=p&&Math.abs(Number(p.positionAmt||0))>0?(Number(p.positionAmt)>0?'BUY':'SELL'):null;
     if(current===row.side){setAutoStatus(`AUTO: posisi ${row.side} tetap berjalan · sinyal ${row.score}/100`,'good');return;}
-    if(current&&current!==row.side){setAutoStatus(`AUTO: sinyal ${row.side} · menutup ${current}…`,'wait');
+    if(current&&current!==row.side){
+      setAutoStatus(`AUTO: sinyal berlawanan terkonfirmasi · menutup ${current}; entry balik ditunda satu candle`,'wait');
       await closePosition({silent:true,auto:true});
-      await new Promise(r=>setTimeout(r,700));
+      AUTO_COOLDOWN_UNTIL=Date.now()+tfMillis(row.tf);
+      try{localStorage.setItem('obsidian_auto_cooldown',String(AUTO_COOLDOWN_UNTIL))}catch{}
       await refreshAccount();
+      if(S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0)throw Error('Posisi belum flat setelah close; entry baru dikunci.');
+      setAutoStatus(`AUTO: posisi ${current} tertutup · menunggu candle berikutnya sebelum ${row.side}`,'wait');
+      return;
     }
     if(!S.accountPosition||Math.abs(Number(S.accountPosition.positionAmt||0))===0){
       setAutoStatus(`AUTO: membuka ${row.side} · skor ${row.score}/100…`,'wait');
@@ -650,7 +658,7 @@ async function scheduleAutoTrade(row){
 function resetAutoProtect(){AUTO_PROTECT={key:null,side:null,peak:0,armed:false,lastActionAt:0};}
 function currentPositionSide(){const p=S.accountPosition;if(!p||Math.abs(Number(p.positionAmt||0))<=0)return null;return Number(p.positionAmt)>0?'BUY':'SELL';}
 async function autoProfitProtect(){
-  if(!AUTO_ENTRY||MANUAL_ENTRY_STOP||autoProtectBusy)return;
+  if(!AUTO_ENTRY||MANUAL_ENTRY_STOP||autoProtectBusy||autoBusy)return;
   const p=S.accountPosition;
   if(!p||Math.abs(Number(p.positionAmt||0))<=0){resetAutoProtect();return;}
   const side=currentPositionSide();
@@ -664,30 +672,18 @@ async function autoProfitProtect(){
   if(AUTO_PROTECT.peak>=armUSDT)AUTO_PROTECT.armed=true;
   if(!AUTO_PROTECT.armed)return;
   const lockUSDT=Math.max(armUSDT*0.25,AUTO_PROTECT.peak*(1-AUTO_PROFIT_GIVEBACK_PCT/100));
-  const sig=getFinalSignal();
-  const opposite=sig.side!=='WAIT'&&sig.side!==side&&Number(sig.score||0)>=AUTO_REENTRY_SCORE&&Number(sig.gap||0)>=AUTO_REENTRY_GAP;
   const giveback=up<=lockUSDT;
-  if(!opposite&&!giveback)return;
+  if(!giveback)return;
   if(Date.now()-AUTO_PROTECT.lastActionAt<8000)return;
   AUTO_PROTECT.lastActionAt=Date.now(); autoProtectBusy=true;
   try{
-    setAutoStatus(opposite?`AUTO PROTECT: ${side} → ${sig.side}, profit dikunci · menutup…`:`AUTO PROTECT: profit puncak ${fmtUSDT(AUTO_PROTECT.peak)} turun ke ${fmtUSDT(up)} · menutup…`,'wait');
+    setAutoStatus(`AUTO PROTECT: profit puncak ${fmtUSDT(AUTO_PROTECT.peak)} turun ke ${fmtUSDT(up)} · menutup untuk mengunci profit…`,'wait');
     await closePosition({silent:true,auto:true});
-    await new Promise(r=>setTimeout(r,900));
     await refreshAccount();
     if(S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0){setAutoStatus('AUTO PROTECT: posisi belum flat, entry baru ditahan','bad');return;}
-    const next=getFinalSignal();
-    const closedSide=side;
-    if(next.side!=='WAIT'&&Number(next.score||0)>=AUTO_REENTRY_SCORE&&Number(next.gap||0)>=AUTO_REENTRY_GAP){
-      const directionChanged=next.side!==closedSide;
-      setAutoStatus(directionChanged?`AUTO RE-ENTRY: ${closedSide} → ${next.side} · ${next.score}/100…`:`AUTO RE-ENTRY: ${next.side} kembali · ${next.score}/100…`,'wait');
-      await order(next.side,{auto:true});
-      await refreshAccount();
-      const actual=currentPositionSide();
-      setAutoStatus(actual===next.side?`AUTO AKTIF: ${actual} · re-entry terkonfirmasi Binance`:'AUTO RE-ENTRY: order belum terdeteksi',actual===next.side?'good':'bad');
-    }else{
-      setAutoStatus(`AUTO PROTECT: posisi ditutup · re-entry menunggu sinyal kuat (${next.side} ${next.score||0}/100)`, 'wait');
-    }
+    AUTO_COOLDOWN_UNTIL=Date.now()+tfMillis(S.tf);
+    try{localStorage.setItem('obsidian_auto_cooldown',String(AUTO_COOLDOWN_UNTIL))}catch{}
+    setAutoStatus('AUTO PROTECT: posisi ditutup untuk mengunci profit · menunggu candle berikutnya sebelum entry baru','wait');
   }catch(e){setAutoStatus(`AUTO PROTECT GAGAL: ${e.message}`,'bad');}
   finally{autoProtectBusy=false;}
 }

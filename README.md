@@ -33,3 +33,10 @@ Replace the previous package with this ZIP. Keep the existing Binance credential
 - Automatic entry errors and failed close confirmations are propagated to the auto-trade status instead of being reported as a successful/unclear action.
 - Auto trade is still browser-driven and uses this device's localStorage setting. Keep the dashboard open and authenticated; it is not a persistent server-side trading worker on Vercel. Closing/suspending the tab stops automatic monitoring. For unattended trading, a separately deployed persistent worker/scheduler with server-side safeguards is required.
 - Trading signals are probabilistic and cannot guarantee profit. Test in Binance Demo Futures before enabling live trading.
+
+
+## Auto-trade safety patch (5.35.0)
+- Confirmed opposite signal closes the existing position but does not reverse in the same candle. A one-timeframe cooldown is applied before any new entry.
+- Auto profit protection now closes only after the configured profit giveback condition; a momentary opposite signal cannot force a close/re-entry loop.
+- Entry and profit-protection automation share a mutual busy guard. The last processed signal and cooldown survive page reloads in localStorage.
+- Deploy this build to Vercel and keep only one dashboard tab open while testing in Demo Futures.
