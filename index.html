@@ -97,7 +97,11 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;background:lin
         <button class="btn" id="autoTradeBtn" type="button" style="font-weight:900;min-width:105px">AUTO: OFF</button>
       </div>
       <div id="autoTradeStatus" class="note" style="margin-top:7px">AUTO TRADE MATI · order hanya manual</div>
-      <div class="note" style="margin-top:4px">OFF = manual. ON = sistem menunggu candle close + konfirmasi kuat. WAIT tidak membuka posisi. Profit tidak dijamin.</div>
+      <div class="g2" style="margin-top:7px">
+        <label class="field"><small>Aktifkan profit lock mulai</small><input id="autoProfitArm" type="number" min="0" step="500" value="5000"></label>
+        <label class="field"><small>Profit yang boleh ditarik dari puncak (%)</small><input id="autoProfitGiveback" type="number" min="5" max="90" step="5" value="10"></label>
+      </div>
+      <div class="note" style="margin-top:4px">AUTO PROTECT: tidak ada batas maksimum profit. Setelah ambang tercapai, sistem melacak profit puncak Binance. Jika profit turun 10% dari puncak (atau sesuai pengaturan), posisi langsung ditutup. Setelah flat, AUTO akan ambil posisi kembali jika FINAL SIGNAL masih kuat, baik arah sama maupun berbalik. Tidak menjamin profit.</div>
     </div>
   </div>
 </div>

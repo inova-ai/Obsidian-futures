@@ -13,6 +13,12 @@ let AUTO_CONFIRM_SCORE=70;
 let AUTO_CONFIRM_GAP=10;
 let lastAutoSignalKey=null;
 let autoBusy=false;
+let AUTO_PROFIT_ARM_IDR=5000;
+let AUTO_PROFIT_GIVEBACK_PCT=10;
+let AUTO_REENTRY_SCORE=70;
+let AUTO_REENTRY_GAP=10;
+let AUTO_PROTECT={key:null,side:null,peak:0,armed:false,lastActionAt:0};
+let autoProtectBusy=false;
 let lastSignalSlot=null,lastSignalSide=null;
 try{SIGNALS=JSON.parse(localStorage.getItem(SIGNAL_KEY)||'[]')}catch{SIGNALS=[]}
 let ws=null,oiTimer=null,pollTimer=null,accountTimer=null,livePollTimer=null,clockTimer=null;
@@ -641,6 +647,50 @@ async function scheduleAutoTrade(row){
   }catch(e){setAutoStatus(`AUTO GAGAL: ${e.message}`,'bad');}
   finally{autoBusy=false;}
 }
+function resetAutoProtect(){AUTO_PROTECT={key:null,side:null,peak:0,armed:false,lastActionAt:0};}
+function currentPositionSide(){const p=S.accountPosition;if(!p||Math.abs(Number(p.positionAmt||0))<=0)return null;return Number(p.positionAmt)>0?'BUY':'SELL';}
+async function autoProfitProtect(){
+  if(!AUTO_ENTRY||MANUAL_ENTRY_STOP||autoProtectBusy)return;
+  const p=S.accountPosition;
+  if(!p||Math.abs(Number(p.positionAmt||0))<=0){resetAutoProtect();return;}
+  const side=currentPositionSide();
+  const up=Number(p.unRealizedProfit||0);
+  if(!Number.isFinite(up))return;
+  const qty=Math.abs(Number(p.positionAmt||0));
+  const key=[S.symbol,side,Number(p.entryPrice||0).toFixed(8),qty.toFixed(8)].join('|');
+  if(AUTO_PROTECT.key!==key){AUTO_PROTECT={key,side,peak:up,armed:false,lastActionAt:0};}
+  if(up>AUTO_PROTECT.peak)AUTO_PROTECT.peak=up;
+  const armUSDT=AUTO_PROFIT_ARM_IDR/USDT_IDR_RATE;
+  if(AUTO_PROTECT.peak>=armUSDT)AUTO_PROTECT.armed=true;
+  if(!AUTO_PROTECT.armed)return;
+  const lockUSDT=Math.max(armUSDT*0.25,AUTO_PROTECT.peak*(1-AUTO_PROFIT_GIVEBACK_PCT/100));
+  const sig=getFinalSignal();
+  const opposite=sig.side!=='WAIT'&&sig.side!==side&&Number(sig.score||0)>=AUTO_REENTRY_SCORE&&Number(sig.gap||0)>=AUTO_REENTRY_GAP;
+  const giveback=up<=lockUSDT;
+  if(!opposite&&!giveback)return;
+  if(Date.now()-AUTO_PROTECT.lastActionAt<8000)return;
+  AUTO_PROTECT.lastActionAt=Date.now(); autoProtectBusy=true;
+  try{
+    setAutoStatus(opposite?`AUTO PROTECT: ${side} → ${sig.side}, profit dikunci · menutup…`:`AUTO PROTECT: profit puncak ${fmtUSDT(AUTO_PROTECT.peak)} turun ke ${fmtUSDT(up)} · menutup…`,'wait');
+    await closePosition({silent:true,auto:true});
+    await new Promise(r=>setTimeout(r,900));
+    await refreshAccount();
+    if(S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0){setAutoStatus('AUTO PROTECT: posisi belum flat, entry baru ditahan','bad');return;}
+    const next=getFinalSignal();
+    const closedSide=side;
+    if(next.side!=='WAIT'&&Number(next.score||0)>=AUTO_REENTRY_SCORE&&Number(next.gap||0)>=AUTO_REENTRY_GAP){
+      const directionChanged=next.side!==closedSide;
+      setAutoStatus(directionChanged?`AUTO RE-ENTRY: ${closedSide} → ${next.side} · ${next.score}/100…`:`AUTO RE-ENTRY: ${next.side} kembali · ${next.score}/100…`,'wait');
+      await order(next.side,{auto:true});
+      await refreshAccount();
+      const actual=currentPositionSide();
+      setAutoStatus(actual===next.side?`AUTO AKTIF: ${actual} · re-entry terkonfirmasi Binance`:'AUTO RE-ENTRY: order belum terdeteksi','good');
+    }else{
+      setAutoStatus(`AUTO PROTECT: posisi ditutup · re-entry menunggu sinyal kuat (${next.side} ${next.score||0}/100)`, 'wait');
+    }
+  }catch(e){setAutoStatus(`AUTO PROTECT GAGAL: ${e.message}`,'bad');}
+  finally{autoProtectBusy=false;}
+}
 function setAutoStatus(msg,cls='wait'){const el=$('autoTradeStatus');if(el){el.textContent=msg;el.className='note '+cls;}}
 function refreshSignalFromCurrent(){recordPredictionSignal()}
 function scheduleLivePrediction(){/* Frozen Signal Drop: no realtime rewriting. */}
@@ -707,8 +757,11 @@ cv.addEventListener('pointerdown',e=>{let r=cv.getBoundingClientRect(),x=e.clien
 cv.addEventListener('pointermove',e=>{if(!S.drag)return;let r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top,{a,dx,py}=priceMap(),i=clamp(Math.round((x-45)/dx),0,a.length-1);if(S.drag.type==='trend'){S.drag.x2=x;S.drag.y2=y}else S.drag.b=a[i]?.c||S.drag.b;draw()});
 cv.addEventListener('pointerup',()=>{S.drag=null});
 $('entryGuard')?.addEventListener('change',e=>{ENTRY_GUARD=e.target.checked;updateEntryButtons()});
-function syncAutoTradeUI(){const b=$('autoTradeBtn');if(b){b.textContent=AUTO_ENTRY?'AUTO: ON':'AUTO: OFF';b.className='btn '+(AUTO_ENTRY?'long':'');b.setAttribute('aria-pressed',AUTO_ENTRY?'true':'false');}setAutoStatus(AUTO_ENTRY?'AUTO TRADE AKTIF · menunggu candle close + sinyal kuat':'AUTO TRADE MATI · order hanya manual',AUTO_ENTRY?'good':'wait');}
+function syncAutoTradeUI(){const b=$('autoTradeBtn');if(b){b.textContent=AUTO_ENTRY?'AUTO: ON':'AUTO: OFF';b.className='btn '+(AUTO_ENTRY?'long':'');b.setAttribute('aria-pressed',AUTO_ENTRY?'true':'false');}setAutoStatus(AUTO_ENTRY?'AUTO TRADE AKTIF · entry + profit lock + reverse otomatis':'AUTO TRADE MATI · order hanya manual',AUTO_ENTRY?'good':'wait');}
 $('autoTradeBtn')?.addEventListener('click',()=>{AUTO_ENTRY=!AUTO_ENTRY;localStorage.setItem('obsidian_auto_trade',AUTO_ENTRY?'1':'0');syncAutoTradeUI();updateEntryButtons()});
+$('autoProfitArm')?.addEventListener('input',e=>{AUTO_PROFIT_ARM_IDR=Math.max(0,Number(e.target.value)||0)});
+$('autoProfitGiveback')?.addEventListener('input',e=>{AUTO_PROFIT_GIVEBACK_PCT=Math.min(90,Math.max(5,Number(e.target.value)||35))});
+
 setTimeout(syncAutoTradeUI,0);
 async function closePosition(opts={}){
   if(!opts.silent&&!confirm(`Tutup posisi ${S.symbol} sekarang pada harga market?\nIni akan menutup posisi yang sedang terbuka.`))return;
@@ -770,7 +823,7 @@ document.getElementById('signalTf')?.addEventListener('change',()=>renderSignalD
 document.getElementById('clearSignals')?.addEventListener('click',()=>{if(!confirm('Hapus riwayat Signal Drop untuk pair ini?'))return;SIGNALS=SIGNALS.filter(x=>x.symbol!==S.symbol);persistSignals();renderSignalDrop()});
 renderSignalDrop();
 ensureAuth();
-Promise.all([jsonFetch('/api/health'),jsonFetch('/api/runtime')]).then(([x,rt])=>{updateModeUI(rt);S.kill=!!x.killSwitch;$('kill').textContent=S.kill?'KILL ON':'KILL'}).catch(e=>{$('conn').textContent='API ERROR';$('conn').title=e.message});render();resize();load();setTimeout(()=>{resize();safeDraw()},250);setInterval(updateAITrend,1500);setInterval(updateLiveSignal,500);setInterval(tickLivePositionHero,1000);setInterval(mtf,5000);setInterval(()=>{renderFutureForecast()},1000);setInterval(scheduleLivePrediction,5000);oiTimer=setInterval(depth,3000);accountTimer=setInterval(refreshAccount,1000);
+Promise.all([jsonFetch('/api/health'),jsonFetch('/api/runtime')]).then(([x,rt])=>{updateModeUI(rt);S.kill=!!x.killSwitch;$('kill').textContent=S.kill?'KILL ON':'KILL'}).catch(e=>{$('conn').textContent='API ERROR';$('conn').title=e.message});render();resize();load();setTimeout(()=>{resize();safeDraw()},250);setInterval(updateAITrend,1500);setInterval(updateLiveSignal,500);setInterval(tickLivePositionHero,1000);setInterval(mtf,5000);setInterval(()=>{renderFutureForecast()},1000);setInterval(autoProfitProtect,1000);setInterval(scheduleLivePrediction,5000);oiTimer=setInterval(depth,3000);accountTimer=setInterval(refreshAccount,1000);
 
 
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstallPrompt=e;const b=$('installPwa');if(b){b.style.display='inline-block';b.classList.add('pwaInstall')}});
