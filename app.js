@@ -50,7 +50,6 @@ let ENTRY_GUARD=true;
 let MANUAL_ENTRY_STOP=false;
 let deferredInstallPrompt=null;
 let lastLivePriceTs=0;
-let CHART_LESSON_INDEX=null;
 
 function scheduleDraw(){if(drawRAF)return;drawRAF=requestAnimationFrame(()=>{drawRAF=0;safeDraw()})}
 function currentLiveSide(){const c=S.c.at(-1); if(!c)return 'WAIT'; const pred=AI_TREND?.side||'WAIT'; const candle=c.c>c.o?'BUY':c.c<c.o?'SELL':'WAIT'; if(pred!=='WAIT')return pred; return candle;}
@@ -172,28 +171,6 @@ function draw(){
   });
   ctx.textAlign='start';
 
-  // EDUCATION OVERLAY: explain the latest/selected candle without claiming certainty.
-  const lessonIdx = Number.isInteger(CHART_LESSON_INDEX) && CHART_LESSON_INDEX>=start && CHART_LESSON_INDEX<start+a.length
-    ? CHART_LESSON_INDEX : (start+a.length-1);
-  const lc = S.c[lessonIdx];
-  if(lc){
-    const lesson=explainCandle(S.c, lessonIdx);
-    const lx=45+(lessonIdx-start)*dx;
-    const anchorY=lesson.side==='BUY'?py(lc.l):lesson.side==='SELL'?py(lc.h):py(lc.c);
-    const boxW=Math.min(330,w-54), boxH=94;
-    let bx=Math.max(48,Math.min(w-boxW-10,lx+14)), by=Math.max(26,Math.min(h-boxH-10,anchorY-(lesson.side==='SELL'?boxH+22:boxH/2)));
-    ctx.save();
-    ctx.strokeStyle=lesson.side==='BUY'?'#19d39b':lesson.side==='SELL'?'#ff5b7c':'#d9b56c';ctx.lineWidth=1;
-    ctx.setLineDash([4,3]);ctx.beginPath();ctx.moveTo(lx,anchorY);ctx.lineTo(bx,by+boxH/2);ctx.stroke();ctx.setLineDash([]);
-    ctx.fillStyle='rgba(8,12,18,.96)';ctx.strokeStyle=lesson.side==='BUY'?'#17664e':lesson.side==='SELL'?'#6d2940':'#6c5724';ctx.lineWidth=1;
-    ctx.beginPath();ctx.roundRect(bx,by,boxW,boxH,8);ctx.fill();ctx.stroke();
-    ctx.fillStyle=lesson.side==='BUY'?'#19d39b':lesson.side==='SELL'?'#ff5b7c':'#d9b56c';ctx.font='bold 11px system-ui';
-    ctx.fillText(`PELAJARAN CANDLE · ${lesson.side==='BUY'?'POTENSI BUY':lesson.side==='SELL'?'POTENSI SELL':'WAIT'}`,bx+10,by+18);
-    ctx.fillStyle='#d7dee9';ctx.font='10px system-ui';
-    const lines=[lesson.pattern,lesson.reason,`Trend: ${lesson.trendSide} · Next: ${lesson.nextSide} (potensi, bukan kepastian)`];
-    lines.forEach((line,j)=>ctx.fillText(line.slice(0,Math.floor((boxW-20)/5.5)),bx+10,by+38+j*17));
-    ctx.restore();
-  }
 
   // Real Binance entry price.
   const ep=S.accountPosition,entry=Number(ep?.entryPrice||0);
@@ -394,24 +371,6 @@ function supertrendSignal(a, liveMode=false){
     : `${side} · harga ${side==='BUY'?'di atas':'di bawah'} garis Supertrend`;
   const gap=Math.max(8,score-48);
   return {side,score,bull:side==='BUY'?score:100-score,bear:side==='SELL'?score:100-score,gap,strength:score>=78?'HIGH':score>=65?'MEDIUM':'LOW',confirmations:1,confirmationsBull:side==='BUY'?1:0,confirmationsBear:side==='SELL'?1:0,reason:[reason],indicator:'SUPER-TREND',supertrend:st,atr};
-}
-function explainCandle(candles,idx){
-  const c=candles?.[idx];
-  if(!c)return {side:'WAIT',trendSide:'WAIT',nextSide:'WAIT',pattern:'Menunggu candle',reason:'Data belum cukup'};
-  const o=Number(c.o||0),h=Number(c.h||o),l=Number(c.l||o),cl=Number(c.c||o),range=Math.max(h-l,Math.abs(cl-o),1e-9);
-  const body=Math.abs(cl-o),bodyPct=body/range*100;
-  const upper=Math.max(0,h-Math.max(o,cl)),lower=Math.max(0,Math.min(o,cl)-l);
-  const upperPct=upper/range*100,lowerPct=lower/range*100,closePos=(cl-l)/range*100;
-  let buy=0,sell=0,reason=[];
-  if(cl>o){buy+=30;reason.push('body hijau/naik')} else if(cl<o){sell+=30;reason.push('body merah/turun')} else reason.push('body kecil/datar');
-  if(lowerPct>=upperPct+8){buy+=28;reason.push('sumbu bawah lebih panjang: harga bawah ditolak')} else if(upperPct>=lowerPct+8){sell+=28;reason.push('sumbu atas lebih panjang: harga atas ditolak')} else reason.push('sumbu relatif seimbang');
-  if(closePos>=68){buy+=22;reason.push('close dekat high')} else if(closePos<=32){sell+=22;reason.push('close dekat low');}
-  if(bodyPct>=55){if(cl>o)buy+=12;else if(cl<o)sell+=12;}
-  const side=buy>=sell+10?'BUY':sell>=buy+10?'SELL':'WAIT';
-  const st=supertrend(candles,10,3),dir=Number(st.trend?.[idx]||0),trendSide=dir>0?'BUY':dir<0?'SELL':'WAIT';
-  const nextSide=side==='BUY'?'BUY':side==='SELL'?'SELL':trendSide;
-  const pattern=side==='BUY'?'Pembeli menahan penurunan':side==='SELL'?'Penjual menahan kenaikan':'Belum ada penolakan yang dominan';
-  return {side,trendSide,nextSide,pattern,reason:reason.slice(0,2).join(' · '),bodyPct,upperPct,lowerPct,closePos};
 }
 function liveCandleEngine(candles=S.c){
   const c=candles?.at?.(-1);
@@ -951,7 +910,7 @@ if(tab==='confluence')updateAITrend();
 function backtest(){let f=Math.max(2,+$('bf').value||20),s=Math.max(f+1,+$('bs').value||50),fee=Math.max(0,+$('fee').value||0)/100,slip=Math.max(0,+$('slip').value||0)/100,fund=Math.max(0,+$('fund').value||0)/100,risk=Math.max(0,+$('brisk').value||1)/100,a=S.c,cl=a.map(x=>x.c);if(cl.length<s+40)return $('bout').textContent='Data belum cukup untuk backtest + walk-forward.';const run=(lo,hi)=>{let ef=EMA(cl.slice(0,hi),f),es=EMA(cl.slice(0,hi),s),pos=0,en=0,ret=0,n=0,peak=0,dd=0;for(let i=Math.max(s,lo);i<hi;i++){if(!pos&&ef[i]>es[i]&&ef[i-1]<=es[i-1]){pos=1;en=cl[i]*(1+slip)}if(pos&&ef[i]<es[i]&&ef[i-1]>=es[i-1]){let r=(cl[i]*(1-slip)-en)/en-fee*2-fund;ret+=r*risk;n++;peak=Math.max(peak,ret);dd=Math.max(dd,peak-ret);pos=0}}if(pos){ret+=((cl[hi-1]*(1-slip)-en)/en-fee*2-fund)*risk}return{ret,n,dd}};let all=run(s,cl.length),wf=[];let train=Math.max(80,Math.floor(cl.length*.35)),test=Math.max(30,Math.floor(cl.length*.15));for(let start=s;start+train+test<=cl.length;start+=test){let trainRes=run(start,start+train),testRes=run(start+train,start+train+test);wf.push({train:trainRes,test:testRes})}const avg=wf.length?wf.reduce((p,x)=>p+x.test.ret,0)/wf.length:0;$('bout').innerHTML=`Full sample return <b class="${all.ret>=0?'good':'bad'}">${(all.ret*100).toFixed(2)}%</b> · ${all.n} closed · Max DD ${(all.dd*100).toFixed(2)}%<br>Walk-forward windows <b>${wf.length}</b> · Out-of-sample avg <b class="${avg>=0?'good':'bad'}">${(avg*100).toFixed(2)}%</b> · fee ${fee*100}%/side · slippage ${slip*100}% · funding ${fund*100}%/8h<br><span class="note">Walk-forward memakai urutan waktu; parameter tidak dioptimalkan pada test window.</span>`}
 function setZoom(span){S.view.span=clamp(span,40,300);S.view.offset=0;safeDraw()}
 $('zoomIn').onclick=()=>setZoom((S.view.span||140)-20);$('zoomOut').onclick=()=>setZoom((S.view.span||140)+20);$('zoomReset').onclick=()=>{S.view={span:140,offset:0};safeDraw()};cv.addEventListener('wheel',e=>{e.preventDefault();setZoom((S.view.span||140)+(e.deltaY>0?20:-20))},{passive:false});
-cv.addEventListener('pointerdown',e=>{let r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top,{a,dx,py}=priceMap(),i=clamp(Math.round((x-45)/dx),0,a.length-1),p=a[i]?.c;if(!S.tool){CHART_LESSON_INDEX=(S.view.offset||0)+i;safeDraw();return}if(S.tool==='trend'){S.drag={type:'trend',x1:x,y1:y,x2:x,y2:y};S.lines.push(S.drag)}else if(S.tool==='fib'){S.drag={type:'fib',a:p,b:p};S.fib=S.drag}else if(S.tool==='sr'){S.sr.push(p);S.tool=null;updateAnalysisUI()}draw()});
+cv.addEventListener('pointerdown',e=>{let r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top,{a,dx,py}=priceMap(),i=clamp(Math.round((x-45)/dx),0,a.length-1),p=a[i]?.c;if(!S.tool)return;if(S.tool==='trend'){S.drag={type:'trend',x1:x,y1:y,x2:x,y2:y};S.lines.push(S.drag)}else if(S.tool==='fib'){S.drag={type:'fib',a:p,b:p};S.fib=S.drag}else if(S.tool==='sr'){S.sr.push(p);S.tool=null;updateAnalysisUI()}draw()});
 cv.addEventListener('pointermove',e=>{if(!S.drag)return;let r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top,{a,dx,py}=priceMap(),i=clamp(Math.round((x-45)/dx),0,a.length-1);if(S.drag.type==='trend'){S.drag.x2=x;S.drag.y2=y}else S.drag.b=a[i]?.c||S.drag.b;draw()});
 cv.addEventListener('pointerup',()=>{S.drag=null});
 $('entryGuard')?.addEventListener('change',e=>{ENTRY_GUARD=e.target.checked;updateEntryButtons()});

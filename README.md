@@ -121,9 +121,16 @@ Replace the previous package with this ZIP. Keep the existing Binance credential
 - Manual BUY/SELL tetap bebas.
 
 
-## v5.40.8 — Premium Desktop/App Visual Skin
+## v5.40.9 — Premium Desktop/App Visual Skin
 - Tampilan utama diubah menjadi dashboard aplikasi trading premium bergaya dark navy/black.
 - Desktop mendapat sidebar aplikasi kiri, header market, chart utama, panel analisis kanan, dan kontrol trading yang lebih tegas.
 - Warna tombol BUY/LONG menggunakan emerald, SELL/SHORT menggunakan coral-red, kontrol aktif menggunakan gold/orange, mengikuti mockup visual yang diminta.
 - Mode HP tetap responsive: sidebar disembunyikan dan layout kembali menjadi satu kolom.
 - Tidak mengubah ID elemen trading atau logika entry/close; perubahan ini fokus pada visual/layout.
+
+
+## v5.40.9 Premium Dashboard Cleanup
+- Premium desktop/app dashboard layout retained and refined.
+- Removed the chart education/lesson popover so the candlestick chart remains unobstructed.
+- Removed the Candle Learning navigation item.
+- Supertrend B/S, realtime candle, position, PnL, entry and execution controls remain unchanged.

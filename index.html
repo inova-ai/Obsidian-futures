@@ -1,5 +1,5 @@
 <!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>OBSIDIAN | Futures Intelligence v5.40.8</title><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#05070b"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Obsidian Futures">
+<title>OBSIDIAN | Futures Intelligence v5.40.9</title><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#05070b"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Obsidian Futures">
 <style>
 :root{--bg:#05070b;--p:#0b1017;--p2:#101722;--line:#1d2938;--txt:#edf2f7;--muted:#8491a4;--gold:#d9b56c;--g:#19d59b;--r:#ff5b7c;--b:#71a7ff;--c:#b78cff}
 *{box-sizing:border-box}body{margin:0;background:#05070b;color:var(--txt);font:12px Inter,system-ui,-apple-system,sans-serif}.top{height:58px;display:flex;align-items:center;gap:12px;padding:0 14px;border-bottom:1px solid var(--line);background:#080c12;position:sticky;top:0;z-index:5}.brand{font-weight:900;letter-spacing:.13em}.brand i{color:var(--gold);font-style:normal}.pair{font-size:16px;font-weight:800}.price{font-weight:800;color:var(--g);font-variant-numeric:tabular-nums}.grow{flex:1}.badge,.btn,select,input{border:1px solid var(--line);background:#0d141d;color:var(--txt);border-radius:7px;padding:7px}.badge{border-radius:16px;color:var(--muted)}button{cursor:pointer}.btn:hover{border-color:#526684}.btn.active{border-color:var(--gold);color:var(--gold)}.danger{color:var(--r);border-color:#6a2b3e}.grid{display:grid;grid-template-columns:minmax(0,1fr) 355px;min-height:calc(100vh - 58px)}main{padding:10px;min-width:0}.panel{background:linear-gradient(180deg,#0b1118,#080c12);border:1px solid var(--line);border-radius:12px;overflow:hidden}.toolbar{display:flex;gap:5px;align-items:center;padding:8px;border-bottom:1px solid var(--line);flex-wrap:wrap}.chartbox{height:560px;position:relative}.chart{width:100%;height:100%;touch-action:none}.side{padding:10px;border-left:1px solid var(--line);background:#070a0f;overflow:auto}.sec{background:#0a0f16;border:1px solid var(--line);border-radius:10px;padding:11px;margin-bottom:9px}.sec h3{text-transform:uppercase;letter-spacing:.1em;font-size:10px;color:#9ca8ba;margin:0 0 9px}.g2{display:grid;grid-template-columns:1fr 1fr;gap:7px}.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px}.field{display:grid;gap:4px;color:var(--muted)}.row{display:flex;justify-content:space-between;gap:8px;margin:7px 0}.good{color:var(--g)}.bad{color:var(--r)}.gold{color:var(--gold)}.blue{color:var(--b)}.full{width:100%}.note{color:var(--muted);font-size:10px;line-height:1.45}.meter{height:4px;background:#17202c;border-radius:8px;overflow:hidden}.meter>i{display:block;height:100%;background:var(--gold);width:0}.bottom{margin-top:10px}.tabs{display:flex;gap:3px;padding:8px;border-bottom:1px solid var(--line);overflow:auto}.tab{padding:7px 9px;color:var(--muted);cursor:pointer;white-space:nowrap}.tab.active{color:#fff;border-bottom:2px solid var(--gold)}.content{padding:10px}.table{width:100%;border-collapse:collapse}.table td,.table th{padding:7px;border-bottom:1px solid #17202b;text-align:left}.scroll{max-height:220px;overflow:auto}.ob{display:grid;grid-template-columns:1fr 1fr;gap:8px}.obside{font-variant-numeric:tabular-nums}.obrow{display:flex;justify-content:space-between;padding:3px 5px}.obrow span:last-child{color:var(--muted)}.statgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px}.stat{padding:7px;background:#0d141d;border-radius:7px}.stat small{display:block;color:var(--muted);font-size:9px}.stat b{font-size:12px}.calcCard{margin-top:8px;padding:10px;border:1px solid #2a3546;border-radius:9px;background:linear-gradient(180deg,#0d141d,#090e15)}.calcTitle{font-size:10px;font-weight:900;letter-spacing:.12em;color:var(--gold);margin-bottom:7px}.pill{display:inline-block;padding:2px 5px;border:1px solid var(--line);border-radius:10px;margin:1px}.switch{display:flex;align-items:center;gap:7px}.switch input{accent-color:var(--gold)}.dangerbox{border-color:#6a2b3e;background:#160b10}@media(max-width:980px){.grid{grid-template-columns:1fr}.side{border-left:0;border-top:1px solid var(--line)}.chartbox{height:470px}}@media(max-width:600px){.top{overflow:auto}.brand{min-width:max-content}.chartbox{height:390px}.g3{grid-template-columns:1fr 1fr}.side{padding:8px}}
@@ -48,7 +48,7 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 .resultRow b{font-size:10px}.resultRow .hit{color:#27e78f;font-weight:900}.resultRow .miss{color:#ff5574;font-weight:900}.resultRow .neutral{color:#d9b56c;font-weight:900}
 @media(max-width:600px){.nextSignalCard{padding:10px}.nextSide{font-size:20px}.resultRow{grid-template-columns:1fr 48px 62px;font-size:9px}}
 
-/* v5.40.8 — Obsidian Futures Desktop/App Dashboard skin
+/* v5.40.9 — Obsidian Futures Desktop/App Dashboard skin
    Visual redesign inspired by the supplied reference: near-black navy canvas,
    emerald BUY, coral SELL, gold active controls, glass panels and app rail.
    Trading logic/IDs are intentionally untouched. */
@@ -73,6 +73,37 @@ body:before{background-image:linear-gradient(rgba(47,104,143,.045) 1px,transpare
 input:focus,select:focus,.btn:focus{outline:none;border-color:#2c638a;box-shadow:0 0 0 2px rgba(18,217,154,.08)}
 @media(max-width:980px){.appRail{display:none}.top{padding-left:14px}.top:after{left:0}.grid{margin-left:0;grid-template-columns:1fr}.grid main{padding:9px}.side{border-left:0;border-top:1px solid #10253a;padding:9px}.chartbox{height:470px}}
 @media(max-width:600px){.top{height:58px;padding:0 8px;gap:6px}.brand{font-size:9px}.brand:before{font-size:12px}.pair{min-width:auto;font-size:12px;padding:7px 9px}.price{font-size:12px}.top .badge{padding:5px 7px;font-size:8px}.top #accountMode{display:none}.top #kill{padding:6px 8px}.grid{min-height:calc(100vh - 58px)}.chartbox{height:390px}.toolbar{gap:4px}.toolbar .btn,.toolbar select{padding:6px;font-size:10px}.liveStrip{grid-template-columns:1fr 1fr!important}.livePositionHero{margin-top:8px}.side{padding:8px}.signalDropV4 .signalDropTitle{font-size:11px!important}}
+
+/* v5.40.9 — final premium dashboard cleanup: chart stays unobstructed. */
+body{overflow-x:hidden}
+.appRail{width:198px}
+.top{padding-left:214px}
+.grid{margin-left:198px;grid-template-columns:minmax(0,1fr) 360px}
+.grid main{padding:12px 12px 20px 14px}
+.side{padding:12px 14px 20px 10px}
+.chartbox{height:590px}
+.toolbar{min-height:48px}
+.liveStrip{grid-template-columns:1.1fr 1fr 1fr .9fr 1fr!important}
+.liveBox{min-height:68px}
+.accountDock{margin-top:12px}
+.bottom{margin-top:12px}
+.side>.sec{background:linear-gradient(180deg,#071522,#050d15);border-color:#173149}
+/* No canvas lesson popover: chart remains clean and fully visible. */
+.chartbox #chartStatus{background:transparent}
+@media(max-width:1180px) and (min-width:981px){
+  .appRail{width:174px}.top{padding-left:188px}.grid{margin-left:174px;grid-template-columns:minmax(0,1fr) 320px}
+  .chartbox{height:540px}.liveStrip{grid-template-columns:1fr 1fr 1fr!important}
+}
+@media(max-width:980px){
+  .appRail{display:none}.top{padding-left:12px}.top:after{left:0}
+  .grid{margin-left:0;grid-template-columns:1fr}.grid main{padding:8px}.side{border-left:0;border-top:1px solid #10253a;padding:8px}
+  .chartbox{height:470px}
+}
+@media(max-width:600px){
+  .top{height:58px;padding:0 8px;gap:6px}.brand{font-size:9px}.pair{min-width:auto;font-size:12px;padding:7px 9px}.price{font-size:12px}.top .badge{padding:5px 7px;font-size:8px}.top #accountMode{display:none}
+  .grid{min-height:calc(100vh - 58px)}.chartbox{height:420px}.toolbar{gap:4px}.toolbar .btn,.toolbar select{padding:6px;font-size:10px}
+  .liveStrip{grid-template-columns:1fr 1fr!important}.liveBox{min-height:62px}.side{padding:8px}
+}
 </style></head><body>
 <nav class="appRail" aria-label="Navigasi Obsidian Futures">
   <div class="railBrand"><div class="railMark">◆</div><div><b>OBSIDIAN</b><span>FUTURES</span></div></div>
@@ -81,12 +112,11 @@ input:focus,select:focus,.btn:focus{outline:none;border-color:#2c638a;box-shadow
     <div class="railItem"><span class="railIcon">⌁</span><span>Trading</span></div>
     <div class="railItem"><span class="railIcon">◉</span><span>Market</span></div>
     <div class="railItem"><span class="railIcon">✦</span><span>AI Signals</span></div>
-    <div class="railItem"><span class="railIcon">▥</span><span>Candle Learning</span></div>
     <div class="railItem"><span class="railIcon">◷</span><span>Riwayat</span></div>
     <div class="railItem"><span class="railIcon">⚙</span><span>Pengaturan</span></div>
   </div>
   <div class="railPromo"><div class="promoDiamond">◆</div><b>OBSIDIAN</b><span>Trade Smarter</span><span>With AI</span></div>
-  <div class="railFoot"><span>v5.40.8</span><span><i></i> Online</span></div>
+  <div class="railFoot"><span>v5.40.9</span><span><i></i> Online</span></div>
 </nav>
 <div id="authbar" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:20;align-items:center;justify-content:center"><div class="panel" style="width:min(420px,92vw);padding:18px"><h2>Obsidian Access</h2><div id="authmsg" class="note">Buat akun lokal atau login.</div><input id="au" placeholder="Username" style="width:100%;margin:6px 0;padding:10px"><input id="ap" type="password" placeholder="Password min 12 karakter" style="width:100%;margin:6px 0;padding:10px"><input id="ac" placeholder="2FA code (jika aktif)" style="width:100%;margin:6px 0;padding:10px"><div class="row"><button class="btn" id="aset">Setup</button><button class="btn active" id="alog">Login</button></div></div></div><header class="top"><div class="brand">OBSIDIAN <i>INTELLIGENCE v5</i></div><div class="pair" id="pair">BTCUSDT</div><div class="price" id="price">—</div><div class="grow"></div><div class="badge" id="conn">OFFLINE</div><div class="badge" id="mode">DEMO</div><div class="badge" id="accountMode">ACCOUNT —</div><button class="btn" id="installPwa" style="display:none">＋ PASANG APP</button><button class="btn danger" id="kill">KILL</button></header>
 <section id="credentialPanel" style="display:none;margin:12px 0;padding:12px;border:1px solid #293246;border-radius:12px;background:#111722"><h3 style="margin:0 0 8px">Binance API Credentials</h3><div class="g3"><label class="field">API Key<input id="apiKey" autocomplete="off"></label><label class="field">API Secret<input id="apiSecret" type="password" autocomplete="new-password"></label><label class="field">2FA Code<input id="credCode" inputmode="numeric" maxlength="6" placeholder="Jika 2FA aktif"></label></div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button class="btn" id="saveCred">Simpan Credential</button><button class="btn" id="removeCred">Hapus Credential</button><button class="btn" id="testBinance">Test Binance</button></div><div id="credStatus" class="note" style="margin-top:8px">Credential tersimpan di server dalam bentuk terenkripsi. Setelah disimpan, form tetap mempertahankan input agar tidak terlihat hilang. Untuk keamanan, jangan bagikan API Secret.</div></section><div class="grid"><main>
