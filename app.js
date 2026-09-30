@@ -9,7 +9,7 @@ let SR_STATE={support:null,resistance:null,context:'NO_LEVEL',distanceSupport:nu
 let SIGNALS=[];
 const SIGNAL_KEY='obsidian_signal_drop_v4';
 let AUTO_ENTRY=localStorage.getItem('obsidian_auto_trade')==='1';
-let AUTO_CONFIRM_SCORE=60;
+let AUTO_CONFIRM_SCORE=65;
 let AUTO_CONFIRM_GAP=4;
 let lastAutoSignalKey=localStorage.getItem('obsidian_auto_last_signal')||null;
 let LAST_ORDER_DIAGNOSTIC={at:0,html:'',keepMs:12000};
@@ -25,7 +25,6 @@ let AUTO_PROTECT_COOLDOWN_MS=15000;
 let AUTO_PROTECT={key:null,side:null,peak:0,armed:false,lastActionAt:0};
 let AUTO_LAST_ATTEMPT={key:null,at:0};
 let AUTO_RETRY_MS=5000;
-let MANUAL_ENTRY_IN_FLIGHT=false;
 let autoProtectBusy=false;
 let lastSignalSlot=null,lastSignalSide=null;
 try{SIGNALS=JSON.parse(localStorage.getItem(SIGNAL_KEY)||'[]')}catch{SIGNALS=[]}
@@ -97,33 +96,22 @@ function draw(){
     ctx.strokeStyle=up?'#19d39b':'#ff5b7c';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,yh);ctx.lineTo(x,yl);ctx.stroke();
     ctx.fillStyle=up?'#19d39b':'#ff5b7c';const top=Math.min(yo,yc),bh=Math.max(1,Math.abs(yc-yo));ctx.fillRect(x-bw/2,top,bw,bh);
   });
+  // SINGLE INDICATOR: Supertrend + B/S flip markers.
+  const st=supertrend(S.c,10,3);
+  if(st.line?.length){
+    const vals=st.line.slice(start);
+    ctx.save(); ctx.lineWidth=1.6;
+    vals.forEach((v,j)=>{ if(!Number.isFinite(v))return; const i=start+j; const x=45+j*dx,y=py(v); ctx.fillStyle=st.trend[i]>0?'#19d39b':'#ff5b7c'; ctx.beginPath(); ctx.arc(x,y,1.8,0,Math.PI*2); ctx.fill(); if(j){ const pv=vals[j-1]; if(Number.isFinite(pv)){ctx.strokeStyle=st.trend[i]>0?'#19d39b':'#ff5b7c';ctx.beginPath();ctx.moveTo(x-dx,py(pv));ctx.lineTo(x,y);ctx.stroke();}} });
+    ctx.font='bold 10px system-ui'; ctx.textAlign='center';
+    (st.flips||[]).filter(f=>f.i>=start&&f.i<a.length).forEach(f=>{const j=f.i-start,c=S.c[f.i],x=45+j*dx; const y=f.side==='BUY'?Math.max(14,py(c.l)-18):Math.min(h-42,py(c.h)+18); ctx.fillStyle=f.side==='BUY'?'#19d39b':'#ff5b7c'; ctx.fillText(f.side==='BUY'?'B':'S',x,y);});
+    ctx.restore(); ctx.textAlign='start';
+  }
   // Swing High / Swing Low markers (H/L)
   const visibleHighs=(S.swings?.hi||[]).filter(i=>i>=start&&i<start+a.length);
   const visibleLows=(S.swings?.lo||[]).filter(i=>i>=start&&i<start+a.length);
   ctx.textAlign='center';ctx.font='bold 10px system-ui';
   visibleHighs.forEach(i=>{const c=S.c[i],x=45+(i-start)*dx,y=Math.max(12,py(c.h)-10);ctx.fillStyle='#ffb35c';ctx.fillText('H',x,y);});
   visibleLows.forEach(i=>{const c=S.c[i],x=45+(i-start)*dx,y=Math.min(h-38,py(c.l)+18);ctx.fillStyle='#6ee7c8';ctx.fillText('L',x,y);});
-  // BUY/SELL signal markers: keep the B/S indicators on the chart.
-  // A signal is frozen at the close of its anchor candle, so the marker is
-  // drawn on that anchor candle rather than moving with the live candle.
-  const sigTf=$('signalTf')?.value||S.tf, sigMs=tfMillis(sigTf);
-  const sigs=(SIGNALS||[]).filter(x=>x.symbol===S.symbol&&x.tf===sigTf&&(x.side==='BUY'||x.side==='SELL'));
-  ctx.font='bold 10px system-ui';ctx.textAlign='center';
-  sigs.forEach(x=>{
-    const anchorTs=Number(x.anchorTs||Number(x.targetTs)-sigMs);
-    const i=S.c.findIndex(c=>Number(c.t)===anchorTs);
-    if(i<start||i>=end||i<0)return;
-    const c=S.c[i],cx=45+(i-start)*dx,isBuy=x.side==='BUY';
-    const y=isBuy?Math.max(14,py(c.l)+30):Math.min(h-16,py(c.h)-30);
-    ctx.save();
-    ctx.fillStyle=isBuy?'#19d39b':'#ff5b7c';
-    ctx.beginPath();
-    if(isBuy){ctx.moveTo(cx,y-6);ctx.lineTo(cx-6,y+5);ctx.lineTo(cx+6,y+5);}else{ctx.moveTo(cx,y+6);ctx.lineTo(cx-6,y-5);ctx.lineTo(cx+6,y-5);}
-    ctx.closePath();ctx.fill();
-    ctx.fillStyle=isBuy?'#7ff2cc':'#ff9ab0';
-    ctx.fillText(isBuy?'B':'S',cx,isBuy?y+17:y-10);
-    ctx.restore();
-  });
   ctx.textAlign='start';
   const closes=a.map(x=>x.c);
   if(S.ema){const e=EMA(closes,20);line(a,e.slice(start),py,dx,'#d9b56c');}
@@ -230,44 +218,6 @@ function renderAccountRealtimeSnapshot(){
 function connect(){closeMarketWS();const s=S.symbol.toLowerCase(),tf=S.tf;const streams=[`${s}@kline_${tf}`,`${s}@markPrice@1s`,`${s}@forceOrder`,`${s}@aggTrade`].join('/');const url=`${MARKET_WS_BASE.replace(/\/$/,'')}/stream?streams=${streams}`;let socket;try{socket=new WebSocket(url);wsMarket=socket}catch(e){$('conn').textContent='REST FALLBACK';startPolling();scheduleMarketReconnect();return}socket.onopen=()=>{if(wsMarket!==socket)return;marketWsConnected=true;lastMarketWsDataAt=Date.now();marketWsRetry=0;stopPolling();$('conn').textContent=publicWsConnected?'REALTIME · WS':'REALTIME · WS (MARKET)';$('conn').title='Binance Futures market WebSocket';safeDraw();chartStatus('REALTIME · Binance Futures WebSocket')};socket.onerror=()=>{if(wsMarket!==socket)return;marketWsConnected=false;$('conn').textContent='RECONNECTING…';$('conn').title='Market WebSocket error; REST fallback active'};socket.onclose=()=>{if(wsMarket!==socket)return;marketWsConnected=false;$('conn').textContent='RECONNECTING…';startPolling();scheduleMarketReconnect()};socket.onmessage=e=>{if(wsMarket!==socket)return;try{lastMarketWsDataAt=Date.now();const z=JSON.parse(e.data),d=z.data||z;if(!d)return;if(d.e==='kline'){const k=d.k,c={t:+k.t,o:+k.o,h:+k.h,l:+k.l,c:+k.c,v:+k.v},q=S.c.at(-1);if(q?.t===c.t){if(lastLivePriceTs>Date.now()-1500){c.c=q.c;c.h=Math.max(c.h,q.h);c.l=Math.min(c.l,q.l)}S.c[S.c.length-1]=c}else S.c.push(c);if(S.c.length>500)S.c.shift();$('price').textContent=fmtIDR(c.c);S.swings=swings(S.c);smart();calc();updateLiveSignal();scheduleDraw();if(k.x)recordClosedSignal(c)}else if(d.e==='markPriceUpdate'){S.market.mark=+d.p;S.market.index=+d.i;S.market.funding=+d.r;$('mark').textContent=fmtIDR(d.p);$('index').textContent=fmtIDR(d.i);$('funding').textContent=(+d.r*100).toFixed(4)+'%';scheduleDraw()}else if(d.e==='aggTrade'){const price=+d.p;if(Number.isFinite(price)){const q=S.c.at(-1);if(q){q.c=price;q.h=Math.max(q.h,price);q.l=Math.min(q.l,price);lastLivePriceTs=Date.now();$('price').textContent=fmtIDR(price);S.market.last=price;updateLiveSignal();scheduleDraw()}}}else if(d.e==='forceOrder'){$('liq').textContent=`${d.o?.S||''} ${fmt(+d.o?.p||0)} × ${fmt(+d.o?.q||0)}`;S.market.liq=d.o?.q||0}}catch{}}}
 function connectPublic(){closePublicWS();const s=S.symbol.toLowerCase();const streams=[`${s}@bookTicker`,`${s}@depth@100ms`].join('/');const url=`${PUBLIC_WS_BASE.replace(/\/$/,'')}/stream?streams=${streams}`;let socket;try{socket=new WebSocket(url);wsPublic=socket}catch{schedulePublicReconnect();return}socket.onopen=()=>{if(wsPublic!==socket)return;publicWsConnected=true;publicWsRetry=0;S.book.ready=false;S.book.buffer=[];syncDepthSnapshot();$('conn').textContent=marketWsConnected?'REALTIME · WS':'REALTIME · PUBLIC WS'};socket.onerror=()=>{if(wsPublic!==socket)return;publicWsConnected=false;$('conn').title='Public WebSocket error; reconnecting'};socket.onclose=()=>{if(wsPublic!==socket)return;publicWsConnected=false;S.book.ready=false;$('conn').textContent=marketWsConnected?'REALTIME · MARKET WS':'RECONNECTING…';schedulePublicReconnect()};socket.onmessage=e=>{if(wsPublic!==socket)return;try{const z=JSON.parse(e.data),d=z.data||z;if(!d)return;if(d.e==='bookTicker'){S.book.bid=+d.b;S.book.ask=+d.a;$('spread').textContent=fmt(+d.a-+d.b);scheduleDraw()}else if(d.e==='depthUpdate'){if(!S.book.ready){S.book.buffer.push(d);if(S.book.buffer.length>2000)S.book.buffer.shift()}else applyDepthUpdate(d)} }catch{}}}
 function tfMillis(tf){const m={1:60000,3:180000,5:300000,15:900000,30:1800000,1.0:3600000};if(tf.endsWith('m'))return Number(tf.slice(0,-1))*60000;if(tf.endsWith('h'))return Number(tf.slice(0,-1))*3600000;if(tf.endsWith('d'))return Number(tf.slice(0,-1))*86400000;return 300000}
-function getConfirmedSignal(){
-  const closed=S.c.slice(0,-1);
-  return predictiveCandle(closed.length?closed:S.c);
-}
-function getRealtimeMomentum(){
-  const live=S.c.at(-1), closed=S.c.slice(0,-1);
-  if(!live||closed.length<30)return {side:'WAIT',score:0,bull:0,bear:0,gap:0,strength:'LOW',reason:['Menunggu data realtime']};
-  const closes=closed.map(x=>x.c), closesLive=[...closes,live.c];
-  const e9=EMA(closesLive,9), e21=EMA(closesLive,21), atrArr=ATR(closed), atr=Number(atrArr.at(-1)||Math.abs(live.c-live.o)||1);
-  const move=(live.c-closed.at(-1).c)/Math.max(atr,1e-12);
-  const body=Math.abs(live.c-live.o), range=Math.max(1e-12,live.h-live.l), bodyPct=body/range;
-  const prior=closed.slice(-12), avgVol=prior.reduce((a,x)=>a+Number(x.v||0),0)/Math.max(1,prior.length), volRatio=avgVol?Number(live.v||0)/avgVol:1;
-  let bull=0,bear=0,reason=[];
-  if(live.c>live.o){bull+=25;reason.push('Candle berjalan bullish');}
-  else if(live.c<live.o){bear+=25;reason.push('Candle berjalan bearish');}
-  if(move>.18){bull+=20;reason.push('Harga naik dari close sebelumnya');}
-  else if(move<-.18){bear+=20;reason.push('Harga turun dari close sebelumnya');}
-  if(e9.at(-1)>e21.at(-1)){bull+=18;reason.push('EMA realtime bullish');}
-  else if(e9.at(-1)<e21.at(-1)){bear+=18;reason.push('EMA realtime bearish');}
-  if(bodyPct>=.55){if(live.c>live.o)bull+=12;else if(live.c<live.o)bear+=12;}
-  if(volRatio>=1.15){if(live.c>live.o){bull+=10;reason.push('Volume mendukung BUY');}else if(live.c<live.o){bear+=10;reason.push('Volume mendukung SELL');}}
-  const lower=(Math.min(live.o,live.c)-live.l)/range, upper=(live.h-Math.max(live.o,live.c))/range;
-  if(lower>=.55){bull+=7;reason.push('Rejection bawah');}
-  if(upper>=.55){bear+=7;reason.push('Rejection atas');}
-  bull=Math.min(100,Math.max(0,bull)); bear=Math.min(100,Math.max(0,bear));
-  const score=Math.max(bull,bear),gap=Math.abs(bull-bear);
-  let side='WAIT';
-  if(bull>=58&&gap>=8)side='BUY'; else if(bear>=58&&gap>=8)side='SELL';
-  return {side,score,bull,bear,gap,strength:score>=78?'HIGH':score>=60?'MEDIUM':'LOW',reason:reason.slice(-6),volumeRatio,move};
-}
-function getFinalSignal(){
-  const c=S.c.at(-1);
-  if(!c)return {side:'WAIT',score:0,gap:0,strength:'LOW',reason:['Menunggu data candle'],final:true};
-  const t=getConfirmedSignal();
-  const ms=tfMillis(S.tf), live=Date.now()>=Number(c.t)&&Date.now()<Number(c.t)+ms;
-  const anchor=live&&S.c.length>1?S.c.at(-2):c;
-  return {...t,final:true,targetTs:Number(anchor.t)+ms,anchorTs:Number(anchor.t),live,momentum:live?getRealtimeMomentum():null};
-}
 function syncPendingFinalSignal(){
   if(!S.c.length)return;
   const t=getFinalSignal();
@@ -279,7 +229,11 @@ function syncPendingFinalSignal(){
   const changed=row.side!==next.side||Number(row.score)!==next.score||Number(row.gap)!==next.gap||row.strength!==next.strength||JSON.stringify(row.reason)!==JSON.stringify(next.reason);
   if(changed){SIGNALS[idx]=next;persistSignals();renderSignalDrop();renderFutureForecast();}
 }
-function updateLiveSignal(){if(!S.c.length)return;const c=S.c.at(-1),t=getFinalSignal(),m=t.momentum||getRealtimeMomentum();const dir=c.c>c.o?'NAIK · B':c.c<c.o?'TURUN · S':'DATAR';const box=$('liveSignalBox'),sig=$('liveEntrySignal'),score=$('liveSignalScore'),cd=$('candleCountdown'),ct=$('candleTime'),clock=$('liveClock'),cdir=$('liveCandleDirection'),cprice=$('liveCandlePrice'),ls=$('signalLiveSide'),lm=$('signalLiveMeta'),msig=$('liveMomentumSignal'),mscore=$('liveMomentumScore'),mbox=$('liveMomentumBox');if(sig){sig.textContent=t.side==='BUY'?'BUY':t.side==='SELL'?'SELL':'WAIT';sig.className='signal '+(t.side==='BUY'?'good':t.side==='SELL'?'bad':'wait')}if(score)score.textContent=`CONFIRMED · ${t.score||0}/100 · ${t.strength||'LOW'} · ${t.confirmations||0} KONF · ${(t.reason||['Belum cukup konfirmasi']).slice(0,2).join(' · ')}`;if(box)box.className='liveBox '+(t.side==='BUY'?'signalBuy':t.side==='SELL'?'signalSell':'signalWait');if(msig){msig.textContent=m.side==='BUY'?'BUY ↑':m.side==='SELL'?'SELL ↓':'WAIT •';msig.className='signal '+(m.side==='BUY'?'good':m.side==='SELL'?'bad':'wait')}if(mscore)mscore.textContent=`REALTIME MOMENTUM · ${m.score||0}/100 · ${(m.reason||['Menunggu momentum']).slice(0,2).join(' · ')}`;if(mbox)mbox.className='liveBox '+(m.side==='BUY'?'signalBuy':m.side==='SELL'?'signalSell':'signalWait');if(cdir){cdir.textContent=dir;cdir.className=''+(dir.startsWith('NAIK')?'good':dir.startsWith('TURUN')?'bad':'wait')}if(cprice)cprice.textContent=`${fmtIDR(c.c)} · Buka ${fmtIDR(c.o)}`;const ms=tfMillis(S.tf),remain=Math.max(0,(c.t+ms)-Date.now()),sec=Math.floor(remain/1000),mm=String(Math.floor(sec/60)).padStart(2,'0'),ss=String(sec%60).padStart(2,'0');if(cd)cd.textContent=`${mm}:${ss}`;if(ct)ct.textContent=`Candle ${new Date(c.t).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})}–${new Date(c.t+ms).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})} WIB`;if(clock)clock.textContent=new Date().toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit',second:'2-digit'});if(ls){ls.textContent=t.side==='BUY'?'BUY ↑':t.side==='SELL'?'SELL ↓':'WAIT •';ls.className='signalSide '+(t.side==='BUY'?'good':t.side==='SELL'?'bad':'wait')}if(lm)lm.textContent=`CONFIRMED ${t.side} · MOMENTUM ${m.side} · ${m.score||0}/100 · ${dir} · ${(m.reason||['—']).slice(0,2).join(' / ')}`;AI_TREND=t; syncPendingFinalSignal(); updateEntryButtons()}
+function updateLiveSignal(){if(!S.c.length)return;const c=S.c.at(-1),t=getFinalSignal(),m=t.momentum||getRealtimeMomentum();const dir=c.c>c.o?'NAIK · B':c.c<c.o?'TURUN · S':'DATAR';const box=$('liveSignalBox'),sig=$('liveEntrySignal'),score=$('liveSignalScore'),cd=$('candleCountdown'),ct=$('candleTime'),clock=$('liveClock'),cdir=$('liveCandleDirection'),cprice=$('liveCandlePrice'),ls=$('signalLiveSide'),lm=$('signalLiveMeta'),msig=$('liveMomentumSignal'),mscore=$('liveMomentumScore'),mbox=$('liveMomentumBox');if(sig){sig.textContent=t.side==='BUY'?'BUY':t.side==='SELL'?'SELL':'WAIT';sig.className='signal '+(t.side==='BUY'?'good':t.side==='SELL'?'bad':'wait')}if(score)score.textContent=`CONFIRMED · ${t.score||0}/100 · ${t.strength||'LOW'} · ${t.confirmations||0} KONF · ${(t.reason||['Belum cukup konfirmasi']).slice(0,2).join(' · ')}`;if(box)box.className='liveBox '+(t.side==='BUY'?'signalBuy':t.side==='SELL'?'signalSell':'signalWait');if(msig){msig.textContent=m.side==='BUY'?'BUY ↑':m.side==='SELL'?'SELL ↓':'WAIT •';msig.className='signal '+(m.side==='BUY'?'good':m.side==='SELL'?'bad':'wait')}if(mscore)mscore.textContent=`REALTIME MOMENTUM · ${m.score||0}/100 · ${(m.reason||['Menunggu momentum']).slice(0,2).join(' · ')}`;if(mbox)mbox.className='liveBox '+(m.side==='BUY'?'signalBuy':m.side==='SELL'?'signalSell':'signalWait');if(cdir){cdir.textContent=dir;cdir.className=''+(dir.startsWith('NAIK')?'good':dir.startsWith('TURUN')?'bad':'wait')}if(cprice)cprice.textContent=`${fmtIDR(c.c)} · Buka ${fmtIDR(c.o)}`;const ms=tfMillis(S.tf),remain=Math.max(0,(c.t+ms)-Date.now()),sec=Math.floor(remain/1000),mm=String(Math.floor(sec/60)).padStart(2,'0'),ss=String(sec%60).padStart(2,'0');if(cd)cd.textContent=`${mm}:${ss}`;if(ct)ct.textContent=`Candle ${new Date(c.t).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})}–${new Date(c.t+ms).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})} WIB`;if(clock)clock.textContent=new Date().toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit',second:'2-digit'});if(ls){ls.textContent=t.side==='BUY'?'BUY ↑':t.side==='SELL'?'SELL ↓':'WAIT •';ls.className='signalSide '+(t.side==='BUY'?'good':t.side==='SELL'?'bad':'wait')}if(lm)lm.textContent=`CONFIRMED ${t.side} · MOMENTUM ${m.side} · ${m.score||0}/100 · ${dir} · ${(m.reason||['—']).slice(0,2).join(' / ')}`;AI_TREND=t;
+  const one=$('singleIndicatorSignal'), oneMeta=$('singleIndicatorMeta');
+  if(one){const liveSide=m?.side&&m.side!=='WAIT'?m.side:t.side; one.textContent=liveSide==='BUY'?'BUY · B':liveSide==='SELL'?'SELL · S':'WAIT'; one.className='signal '+(liveSide==='BUY'?'good':liveSide==='SELL'?'bad':'wait');}
+  if(oneMeta)oneMeta.textContent=`SUPERTREND 10/3 · Confirmed ${t.side} ${t.score||0}/100 · Realtime ${m?.side||'WAIT'} ${m?.score||0}/100`;
+  syncPendingFinalSignal(); updateEntryButtons()}
 function fmtDuration(ms){if(!Number.isFinite(ms)||ms<0)return '—';const sec=Math.floor(ms/1000),d=Math.floor(sec/86400),h=Math.floor(sec%86400/3600),m=Math.floor(sec%3600/60),ss=sec%60;return (d?d+'h ':'')+String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(ss).padStart(2,'0')}
 function updateLivePositionHero(p){
   const hero=$('livePositionHero'),badge=$('liveHeroBadge'); if(!hero||!badge)return;
@@ -336,152 +290,53 @@ function detectSR(c){
   if(last.h>(resistance?.p||Infinity)&&last.c<(resistance?.p||-Infinity))context='RESISTANCE_REJECTION';
   return {support:support?.p||null,resistance:resistance?.p||null,context,distanceSupport:ds,distanceResistance:dr,atr};
 }
-function predictiveCandle(c){
-  const sr=detectSR(c);
-  if(!c||c.length<55)return {side:'WAIT',score:0,bull:0,bear:0,gap:0,reason:['Need at least 55 closed candles'],strength:'LOW',confirmations:0,sr};
-
-  // v5.37 signal engine: closed-candle-first, multi-factor confluence.
-  // It intentionally prefers WAIT when trend/momentum/structure disagree.
-  const a=c, n=a.length-1, x=a[n], prev=a[n-1];
-  let bull=0,bear=0,reason=[],confirmationsBull=0,confirmationsBear=0;
-  const range=Math.max(1e-12,x.h-x.l), body=Math.abs(x.c-x.o);
-  const upper=x.h-Math.max(x.o,x.c), lower=Math.min(x.o,x.c)-x.l;
-  const closes=a.map(z=>z.c), vols=a.map(z=>Number(z.v||0));
-  const e9=EMA(closes,9),e21=EMA(closes,21),e50=EMA(closes,50);
-  const rsi=RSI(closes,14), macd=MACD(closes), adx=ADX(a,14), vwap=VWAP(a);
-  const atr=ATR(a,14);
-  const avgVol=SMA(vols,20), volRatio=vols[n]/Math.max(1e-12,avgVol[n-1]||avgVol[n]);
-  const slope=(arr,k)=>arr[n]-arr[Math.max(0,n-k)];
-  const e9s=slope(e9,3), e21s=slope(e21,5), vwapS=slope(vwap,5), atrNow=atr[n]||range;
-  const bodyPct=body/range;
-
-  // 1) Candle structure / rejection
-  if(lower/range>=.45){bull+=12;confirmationsBull++;reason.push('Lower-wick rejection');}
-  if(upper/range>=.45){bear+=12;confirmationsBear++;reason.push('Upper-wick rejection');}
-  if(bodyPct>=.58&&x.c>x.o){bull+=12;confirmationsBull++;reason.push('Bullish close kuat');}
-  if(bodyPct>=.58&&x.c<x.o){bear+=12;confirmationsBear++;reason.push('Bearish close kuat');}
-
-  // Engulfing adds confirmation only when it agrees with the close direction.
-  const prevBody=Math.abs(prev.c-prev.o);
-  const bullEng=prev.c<prev.o&&x.c>x.o&&x.o<=prev.c&&x.c>=prev.o&&body>=prevBody*.9;
-  const bearEng=prev.c>prev.o&&x.c<x.o&&x.o>=prev.c&&x.c<=prev.o&&body>=prevBody*.9;
-  if(bullEng){bull+=10;confirmationsBull++;reason.push('Bullish engulfing');}
-  if(bearEng){bear+=10;confirmationsBear++;reason.push('Bearish engulfing');}
-
-  // 2) Trend alignment (fast/medium/slow)
-  if(e9[n]>e21[n]&&e21[n]>e50[n]&&e9s>0&&e21s>0){bull+=16;confirmationsBull++;reason.push('Trend EMA 9>21>50');}
-  else if(e9[n]<e21[n]&&e21[n]<e50[n]&&e9s<0&&e21s<0){bear+=16;confirmationsBear++;reason.push('Trend EMA 9<21<50');}
-  else if(e9[n]>e21[n]&&e9s>0){bull+=7;confirmationsBull++;reason.push('EMA momentum naik');}
-  else if(e9[n]<e21[n]&&e9s<0){bear+=7;confirmationsBear++;reason.push('EMA momentum turun');}
-
-  // 3) Momentum: RSI + MACD must agree rather than using one indicator alone.
-  const rv=Number(rsi[n]), rp=Number(rsi[Math.max(0,n-3)]);
-  if(Number.isFinite(rv)){
-    if(rv>=52&&rv<=70&&rv>rp){bull+=10;confirmationsBull++;reason.push(`RSI bullish ${rv.toFixed(0)}`);}
-    if(rv<=48&&rv>=30&&rv<rp){bear+=10;confirmationsBear++;reason.push(`RSI bearish ${rv.toFixed(0)}`);}
-    if(rv>=76){bear+=5;bull-=4;reason.push('RSI terlalu panas → BUY dikurangi');}
-    if(rv<=24){bull+=5;bear-=4;reason.push('RSI terlalu rendah → SELL dikurangi');}
+function supertrend(a, period=10, multiplier=3){
+  if(!a||a.length<period+2)return {trend:[],upper:[],lower:[],line:[],flips:[]};
+  const atr=ATR(a,period), upper=[], lower=[], line=[], trend=[], flips=[];
+  for(let i=0;i<a.length;i++){
+    const hl2=(a[i].h+a[i].l)/2, av=Number(atr[i]||0), bu=hl2+multiplier*av, bl=hl2-multiplier*av;
+    if(i===0){upper[i]=bu;lower[i]=bl;trend[i]=1;line[i]=bl;continue;}
+    upper[i]=(bu<upper[i-1]||a[i-1].c>upper[i-1])?bu:upper[i-1];
+    lower[i]=(bl>lower[i-1]||a[i-1].c<lower[i-1])?bl:lower[i-1];
+    trend[i]=trend[i-1];
+    if(trend[i-1]<0 && a[i].c>upper[i-1])trend[i]=1;
+    else if(trend[i-1]>0 && a[i].c<lower[i-1])trend[i]=-1;
+    line[i]=trend[i]>0?lower[i]:upper[i];
+    if(trend[i]!==trend[i-1])flips.push({i,side:trend[i]>0?'BUY':'SELL',price:a[i].c});
   }
-  if(macd.h[n]>0&&macd.h[n]>macd.h[Math.max(0,n-1)]){bull+=10;confirmationsBull++;reason.push('MACD histogram menguat');}
-  else if(macd.h[n]<0&&macd.h[n]<macd.h[Math.max(0,n-1)]){bear+=10;confirmationsBear++;reason.push('MACD histogram melemah');}
-
-  // 4) Trend strength / VWAP
-  const av=Number(adx[n]);
-  if(Number.isFinite(av)&&av>=20){
-    if(e21[n]>e50[n]&&e21s>0){bull+=7;confirmationsBull++;reason.push(`ADX ${av.toFixed(0)} + trend bullish`);}
-    if(e21[n]<e50[n]&&e21s<0){bear+=7;confirmationsBear++;reason.push(`ADX ${av.toFixed(0)} + trend bearish`);}
-  }else if(Number.isFinite(av)&&av<16){reason.push('ADX rendah → market cenderung choppy');}
-  if(x.c>vwap[n]&&vwapS>0){bull+=7;confirmationsBull++;reason.push('Harga di atas VWAP');}
-  if(x.c<vwap[n]&&vwapS<0){bear+=7;confirmationsBear++;reason.push('Harga di bawah VWAP');}
-
-  // 5) Volume confirmation: breakout without volume is treated cautiously.
-  if(volRatio>=1.25){
-    if(x.c>x.o){bull+=7;confirmationsBull++;reason.push(`Volume konfirmasi ${volRatio.toFixed(1)}×`);}
-    if(x.c<x.o){bear+=7;confirmationsBear++;reason.push(`Volume konfirmasi ${volRatio.toFixed(1)}×`);}
-  }
-
-  // 6) S/R: rejection and clean break are stronger than simply being near a level.
-  if(sr.context==='SUPPORT_REJECTION'){bull+=18;confirmationsBull++;reason.push('Rejection support');}
-  if(sr.context==='RESISTANCE_REJECTION'){bear+=18;confirmationsBear++;reason.push('Rejection resistance');}
-  if(sr.support&&x.c>sr.support&&prev.c<=sr.support){bull+=12;confirmationsBull++;reason.push('Reclaim support');}
-  if(sr.resistance&&x.c<sr.resistance&&prev.c>=sr.resistance){bear+=12;confirmationsBear++;reason.push('Reject resistance');}
-  if(sr.resistance&&x.c>sr.resistance&&prev.c<=sr.resistance&&volRatio>=1.15){bull+=14;confirmationsBull++;reason.push('Breakout resistance + volume');}
-  if(sr.support&&x.c<sr.support&&prev.c>=sr.support&&volRatio>=1.15){bear+=14;confirmationsBear++;reason.push('Breakdown support + volume');}
-
-  // 7) Recent range breakout. Require volume or strong body so ordinary wicks do not trigger entries.
-  const prior20=a.slice(Math.max(0,n-20),n), hi20=Math.max(...prior20.map(z=>z.h)), lo20=Math.min(...prior20.map(z=>z.l));
-  if(x.c>hi20&&bodyPct>=.55&&volRatio>=1.15){bull+=12;confirmationsBull++;reason.push('Breakout 20-candle');}
-  if(x.c<lo20&&bodyPct>=.55&&volRatio>=1.15){bear+=12;confirmationsBear++;reason.push('Breakdown 20-candle');}
-
-  // 8) Exhaustion filter near S/R. It reduces chasing into a nearby barrier.
-  const nearPct=.35;
-  if(sr.resistance&&sr.distanceResistance!=null&&sr.distanceResistance<nearPct&&x.c<sr.resistance){bear+=9;bull-=7;reason.push('Dekat resistance → hindari chase BUY');}
-  if(sr.support&&sr.distanceSupport!=null&&sr.distanceSupport<nearPct&&x.c>sr.support){bull+=9;bear-=7;reason.push('Dekat support → hindari chase SELL');}
-
-  // 9) MTF context. Higher timeframes can veto a weak counter-trend signal.
-  const mtfWeights={ '1m':2, '5m':4, '15m':6, '1h':8, '4h':6 };
-  let mtfBull=0,mtfBear=0;
-  if(S.mtf&&typeof S.mtf==='object'){
-    for(const [tf,w] of Object.entries(mtfWeights)){
-      const v=S.mtf[tf]; if(!v)continue;
-      const ad=Number(v.ad), strength=Number.isFinite(ad)?clamp(ad/30,.6,1.25):.8;
-      if(v.dir==='BULL')mtfBull+=w*strength;
-      else if(v.dir==='BEAR')mtfBear+=w*strength;
-    }
-  }
-  if(mtfBull>mtfBear+5){bull+=Math.min(14,mtfBull);confirmationsBull++;reason.push('MTF bullish selaras');}
-  else if(mtfBear>mtfBull+5){bear+=Math.min(14,mtfBear);confirmationsBear++;reason.push('MTF bearish selaras');}
-
-  bull=Math.max(0,Math.min(100,bull));
-  bear=Math.max(0,Math.min(100,bear));
-  const gap=Math.abs(bull-bear),score=Math.max(bull,bear);
-  const dominant=bull>=bear?'BUY':'SELL';
-  const dominantConfirmations=dominant==='BUY'?confirmationsBull:confirmationsBear;
-  const opposite=dominant==='BUY'?bear:bull;
-  const adxOk=Number.isFinite(av)?av>=18:true;
-  const mtfConflictBull=mtfBear>mtfBull+7, mtfConflictBear=mtfBull>mtfBear+7;
-  const conflict=(bull>=50&&bear>=50&&gap<8);
-  const trendWeak=(dominant==='BUY'&&!adxOk&&confirmationsBull<4)||(dominant==='SELL'&&!adxOk&&confirmationsBear<4);
-  let side='WAIT';
-  if(!conflict&&dominantConfirmations>=4&&score>=68&&gap>=12&&!trendWeak&&!(dominant==='BUY'&&mtfConflictBull)&&!(dominant==='SELL'&&mtfConflictBear))side=dominant;
-  else reason.push(conflict?'Konflik BUY/SELL → WAIT':trendWeak?'Trend strength belum cukup → WAIT':'Konfirmasi belum cukup (≥4 faktor, skor ≥68, gap ≥12) → WAIT');
-  const strength=score>=82&&gap>=18&&dominantConfirmations>=5?'HIGH':score>=68&&gap>=12&&dominantConfirmations>=4?'MEDIUM':'LOW';
-  return {side,score,bull,bear,gap,mtfBull,mtfBear,confirmations:dominantConfirmations,confirmationsBull,confirmationsBear,adx:av,rsi:rv,volumeRatio:volRatio,atr:atrNow,reason:reason.slice(-9),strength,sr};
+  return {trend,upper,lower,line,flips,atr};
 }
-function aiCandleTrend(c){
-  if(!c||c.length<30)return {side:'WAIT',score:0,reason:['Need at least 30 candles'],strength:'LOW'};
-  const close=c.map(x=>x.c), e9=EMA(close,9), e21=EMA(close,21), e50=EMA(close,50);
-  const last=c.length-1, recent=c.slice(-12);
-  let bull=0,bear=0,reason=[];
-  const slope=(a,n)=>a[last]-a[last-n];
-  const s9=slope(e9,5),s21=slope(e21,5);
-  if(e9[last]>e21[last]&&s9>0) {bull+=25;reason.push('EMA 9 > EMA 21 dan slope naik')}
-  else if(e9[last]<e21[last]&&s9<0) {bear+=25;reason.push('EMA 9 < EMA 21 dan slope turun')}
-  if(e21[last]>e50[last]&&s21>0) {bull+=20;reason.push('Trend menengah bullish')}
-  else if(e21[last]<e50[last]&&s21<0) {bear+=20;reason.push('Trend menengah bearish')}
-  let up=0,down=0;
-  for(let i=1;i<recent.length;i++){
-    if(recent[i].c>recent[i-1].c)up++;
-    if(recent[i].c<recent[i-1].c)down++;
-  }
-  if(up>=8){bull+=20;reason.push('Mayoritas candle naik')}
-  if(down>=8){bear+=20;reason.push('Mayoritas candle turun')}
-  const body=recent.map(x=>Math.abs(x.c-x.o)), avg=body.reduce((a,b)=>a+b,0)/body.length;
-  const lastBody=Math.abs(c[last].c-c[last].o);
-  if(lastBody>avg*1.25){
-    if(c[last].c>c[last].o){bull+=10;reason.push('Candle terakhir bullish kuat')}
-    else if(c[last].c<c[last].o){bear+=10;reason.push('Candle terakhir bearish kuat')}
-  }
-  const hh=recent[recent.length-1].h>Math.max(...recent.slice(0,-1).map(x=>x.h));
-  const ll=recent[recent.length-1].l<Math.min(...recent.slice(0,-1).map(x=>x.l));
-  if(hh){bull+=15;reason.push('Break recent high / higher-high')}
-  if(ll){bear+=15;reason.push('Break recent low / lower-low')}
-  const total=bull+bear;
-  let side='WAIT',score=Math.max(bull,bear);
-  if(bull>=55&&bull-bear>=8)side='BUY';
-  else if(bear>=55&&bear-bull>=8)side='SELL';
-  else {score=Math.max(bull,bear);reason.push('Skor di bawah threshold 55 atau selisih < 8 → WAIT')}
-  return {side,score,bull,bear,reason,strength:score>=75?'HIGH':score>=60?'MEDIUM':'LOW'};
+function supertrendSignal(a, liveMode=false){
+  if(!a||a.length<30)return {side:'WAIT',score:0,bull:0,bear:0,gap:0,strength:'LOW',confirmations:0,reason:['Menunggu minimal 30 candle'],indicator:'SUPER-TREND'};
+  const st=supertrend(a,10,3), i=a.length-1, dir=st.trend[i];
+  if(!dir)return {side:'WAIT',score:0,bull:0,bear:0,gap:0,strength:'LOW',confirmations:0,reason:['Supertrend belum siap'],indicator:'SUPER-TREND'};
+  const x=a[i], prev=a[Math.max(0,i-1)], atr=Number(st.atr?.[i]||Math.abs(x.c-x.o)||1);
+  const dist=Math.abs(x.c-(st.line[i]||x.c))/Math.max(atr,1e-12);
+  const slope=(st.line[i]||x.c)-(st.line[Math.max(0,i-3)]||x.c);
+  const body=Math.abs(x.c-x.o)/Math.max(1e-12,x.h-x.l);
+  let score=60+Math.min(20,Math.round(dist*12));
+  if(dir>0 && x.c>x.o)score+=8;
+  if(dir<0 && x.c<x.o)score+=8;
+  if(dir>0 && slope>0)score+=5;
+  if(dir<0 && slope<0)score+=5;
+  score=Math.max(50,Math.min(95,score));
+  const side=dir>0?'BUY':'SELL';
+  const flip=st.flips.find(f=>f.i===i);
+  const reason=flip
+    ? `${side} · Supertrend berbalik realtime${liveMode?'':' pada candle close'}`
+    : `${side} · harga ${side==='BUY'?'di atas':'di bawah'} garis Supertrend`;
+  const gap=Math.max(8,score-48);
+  return {side,score,bull:side==='BUY'?score:100-score,bear:side==='SELL'?score:100-score,gap,strength:score>=78?'HIGH':score>=65?'MEDIUM':'LOW',confirmations:1,confirmationsBull:side==='BUY'?1:0,confirmationsBear:side==='SELL'?1:0,reason:[reason],indicator:'SUPER-TREND',supertrend:st,atr};
+}
+function predictiveCandle(c){return supertrendSignal(c,false)}
+function aiCandleTrend(c){return supertrendSignal(c,false)}
+function getRealtimeMomentum(){return supertrendSignal(S.c,true)}
+function getConfirmedSignal(){const closed=S.c.slice(0,-1);return predictiveCandle(closed.length?closed:S.c)}
+function getFinalSignal(){
+  const c=S.c.at(-1); if(!c)return {side:'WAIT',score:0,gap:0,strength:'LOW',reason:['Menunggu data candle'],final:true};
+  const t=getConfirmedSignal(); const ms=tfMillis(S.tf), live=Date.now()>=Number(c.t)&&Date.now()<Number(c.t)+ms;
+  const anchor=live&&S.c.length>1?S.c.at(-2):c;
+  return {...t,final:true,targetTs:Number(anchor.t)+ms,anchorTs:Number(anchor.t),live,momentum:live?getRealtimeMomentum():null};
 }
 function updateAITrend(){
   const t=getFinalSignal();
@@ -861,9 +716,6 @@ function normalizePositionSide(side){const v=String(side||'').toUpperCase();if(v
 async function order(side,opts={}){
   side=normalizePositionSide(side);
   const isAuto=!!opts.auto;
-  if(!isAuto && MANUAL_ENTRY_IN_FLIGHT){setAutoStatus('ENTRY MANUAL: order sebelumnya masih diproses Binance…','wait');return;}
-  if(!isAuto)MANUAL_ENTRY_IN_FLIGHT=true;
-  try {
   if(isAuto&&!AUTO_ENTRY)return;
   if(!isAuto&&!window.__manualOrderClick&&AUTO_ENTRY===true)return;
   if(S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0)return alert(`Masih ada posisi Binance ${Number(S.accountPosition.positionAmt)>0?'LONG':'SHORT'} ${Math.abs(Number(S.accountPosition.positionAmt)).toFixed(6)} BTC. Tutup posisi aktif dulu.`);
@@ -925,9 +777,8 @@ Lanjut entry?`;
     if(isAuto)throw Error(msg);
     return alert(msg);
   }
-  $('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="${match?'good':'bad'}">ENTRY ${side==='LONG'?'BUY / LONG':'SELL / SHORT'} ${match?'TERSINKRON':'PERIKSA QTY'}</b><div class="note">Target server <b>${Number(sz.finalQty||preview.finalQty).toFixed(6)} BTC</b> · Notional target <b>${fmtIDR(Number(sz.finalNotional||preview.finalNotional))}</b> · Binance aktual <b>${ap?Number(ap.quantity).toFixed(6):'—'} BTC</b> / ${ap?fmtIDR(Number(ap.notional||0)):'—'} · Entry ${fmtIDR(Number(ap?.entryPrice||preview.entryPrice))} · SL ${noTp?'TIDAK DIPASANG':fmtIDR(slIDR)} · Target ${noTp?'TANPA BATAS':fmtIDR(tpIDR)}</div><div class="note good">Posisi Binance adalah sumber kebenaran. Jika proteksi exchange ditolak, manual BUY/SELL tetap masuk dan dashboard menjaga pemantauan realtime.</div>`;
+  $('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="${match?'good':'bad'}">ENTRY ${side==='LONG'?'BUY / LONG':'SELL / SHORT'} ${match?'TERSINKRON':'PERIKSA QTY'}</b><div class="note">Target server <b>${Number(sz.finalQty||preview.finalQty).toFixed(6)} BTC</b> · Notional target <b>${fmtIDR(Number(sz.finalNotional||preview.finalNotional))}</b> · Binance aktual <b>${ap?Number(ap.quantity).toFixed(6):'—'} BTC</b> / ${ap?fmtIDR(Number(ap.notional||0)):'—'} · Entry ${fmtIDR(Number(ap?.entryPrice||preview.entryPrice))} · SL ${fmtIDR(slIDR)} · Target ${noTp?'TANPA BATAS':fmtIDR(tpIDR)}</div><div class="note good">Rp300.000 × 20× hanya menjadi ±Rp6.000.000 jika Qty aktual Binance memang sesuai target. UI memakai Qty Binance sebagai sumber kebenaran.</div>`;
   if(mode==='paper'&&x.position){S.positions.push(x.position);render('positions')}else{await refreshAccount()}
-  } finally { if(!isAuto)MANUAL_ENTRY_IN_FLIGHT=false; }
 }
 
 function fmtIDRNumber(usdt){return Number(usdt||0)*USDT_IDR_RATE}
@@ -985,6 +836,8 @@ $('entryPrice').disabled=true; updateEntryPreview(); updateAnalysisUI();
 $('symbol').onchange=e=>{S.symbol=e.target.value;$('pair').textContent=S.symbol;load()};$('tf').onchange=e=>{S.tf=e.target.value;load()};
 function updateAnalysisUI(){
   const activeTool=S.tool||'';
+  const stb=$('supertrendBtn'); if(stb){stb.classList.add('active');stb.title='Supertrend 10/3 · satu-satunya indikator signal · B/S realtime';}
+  S.ema=false; S.bb=false; S.macd=false; S.vwap=false; S.adx=false; S.atr=false;
   [['emaBtn','ema'],['bbBtn','bb'],['macdBtn','macd'],['vwapBtn','vwap'],['adxBtn','adx'],['atrBtn','atr']].forEach(([id,k])=>{const b=$(id);if(b){b.classList.toggle('active',!!S[k]);b.title=`${k.toUpperCase()} · ANALISIS SAJA · tidak mengirim order`;}});
   [['trendBtn','trend'],['fibBtn','fib']].forEach(([id,k])=>{const b=$(id);if(b){b.classList.toggle('active',activeTool===k);b.title=`${k==='fib'?'Fibonacci':'Trendline'} · ANALISIS SAJA · klik chart untuk menggambar`;}});
   const sr=$('srBtn'); if(sr){sr.title='Auto S/R · ANALISIS SAJA · menghitung support/resistance, tidak mengirim order';sr.classList.toggle('active',Array.isArray(S.sr)&&S.sr.length>0);}
@@ -993,6 +846,7 @@ function updateAnalysisUI(){
 }
 [['emaBtn','ema'],['bbBtn','bb'],['macdBtn','macd'],['vwapBtn','vwap'],['adxBtn','adx'],['atrBtn','atr']].forEach(([id,k])=>$(id).onclick=()=>{S[k]=!S[k];updateAnalysisUI();draw();calc();updateAITrend()});
 function setChartTool(tool){S.tool=S.tool===tool?null:tool;S.drag=null;updateAnalysisUI();draw();}
+if($('supertrendBtn'))$('supertrendBtn').onclick=()=>{S.ema=false;S.bb=false;S.macd=false;S.vwap=false;S.adx=false;S.atr=false;draw();updateAITrend();};
 $('trendBtn').onclick=()=>setChartTool('trend');
 $('fibBtn').onclick=()=>setChartTool('fib');
 $('srBtn').onclick=()=>{const sr=detectSR(S.c.slice(0,-1));SR_STATE=sr;S.sr=[sr.support,sr.resistance].filter(Boolean);updateAnalysisUI();draw();updateAITrend();alert(`Auto S/R\nSupport: ${sr.support?fmt(sr.support):'—'}\nResistance: ${sr.resistance?fmt(sr.resistance):'—'}\nContext: ${sr.context}\n\nMode: ANALISIS SAJA — tidak ada order yang dikirim.`)};
