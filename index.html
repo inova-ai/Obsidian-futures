@@ -58,8 +58,8 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 <div class="zoomGroup"><button class="btn zoomBtn" id="zoomOut" title="Zoom out">−</button><button class="btn zoomBtn" id="zoomIn" title="Zoom in">+</button><button class="btn zoomBtn" id="zoomReset" title="Reset zoom">↺</button></div><span class="chartHint">Pinch / wheel / tombol ± untuk zoom</span></div><div class="chartbox"><canvas id="chart" class="chart" aria-label="Grafik candlestick Binance Futures"></canvas><div id="chartStatus" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:20px;text-align:center;color:#8491a4;font:12px system-ui;pointer-events:none">Menghubungkan data market…</div></div></div>
 <div class="liveStrip">
   <div class="liveBox" id="liveSignalBox"><small>FINAL SIGNAL · ENTRY BERIKUTNYA</small><b id="liveEntrySignal">WAIT</b><div class="sub" id="liveSignalScore">Menunggu konfirmasi</div></div>
-  <div class="liveBox signalWait" id="liveMomentumBox"><small>MOMENTUM REALTIME · CANDLE BERJALAN</small><b id="liveMomentumSignal">WAIT •</b><div class="sub" id="liveMomentumScore">Menunggu momentum</div></div>
-  <div class="liveBox"><small>ARAH CANDLE</small><b id="liveCandleDirection">—</b><div class="sub" id="liveCandlePrice">—</div></div>
+  <div class="liveBox signalWait" id="liveMomentumBox"><small>AI CANDLE LIVE · BODY + WICK</small><b id="liveMomentumSignal">WAIT •</b><div class="sub" id="liveMomentumScore">Menunggu candle realtime</div></div>
+  <div class="liveBox"><small>ARAH CANDLE LIVE</small><b id="liveCandleDirection">—</b><div class="sub" id="liveCandlePrice">—</div></div>
   <div class="liveBox"><small>TUTUP CANDLE</small><b class="countdown" id="candleCountdown">—</b><div class="sub" id="candleTime">—</div></div>
   <div class="liveBox"><small>JAM WIB</small><b class="liveTicker" id="liveClock">—</b><div class="sub">Jam Jakarta realtime</div></div>
 </div>
@@ -140,4 +140,4 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 <div class="sec"><h3>Buku Pesanan / Kedalaman</h3><div class="ob"><div><div class="note">BIDS</div><div id="bids" class="obside"></div></div><div><div class="note">ASKS</div><div id="asks" class="obside"></div></div></div><div class="row"><span>Spread</span><b id="spread">—</b></div><div class="row"><span>Imbalance</span><b id="imbalance">—</b></div></div>
 <div id="legacyAccountFields" style="display:none"><span id="balance">—</span><span id="availableBalance">—</span><span id="upnl">—</span><span id="liqPrice">—</span><span id="dd">—</span><button id="reconcile" type="button">Reconcile</button></div>
 </aside></div>
-<script src="/app.js?v=5.38.7"></script></body></html>
+<script src="/app.js?v=5.40.6"></script></body></html>

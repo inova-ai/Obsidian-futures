@@ -104,3 +104,18 @@ Replace the previous package with this ZIP. Keep the existing Binance credential
 - Detail error Binance ditampilkan apa adanya bila tersedia.
 - API entry memastikan field `error` selalu berupa string.
 - Tidak mengubah logika indikator Supertrend/B/S atau sizing/order execution.
+
+## v5.40.4 — Entry Timing Guard
+- Supertrend B/S tetap digunakan.
+- AUTO tidak entry hanya karena skor signal tinggi.
+- Sebelum order AUTO, sistem mengecek momentum realtime, arah candle realtime, posisi harga dalam range, dan jarak harga dari garis Supertrend.
+- Jika harga sudah terlalu dekat puncak/dasar atau sedang berlawanan arah, AUTO berubah menjadi WAIT dan tidak mengejar harga.
+- Manual BUY/SELL tetap bisa digunakan pengguna secara eksplisit.
+\n\n## v5.40.5 — Trend vs Entry State\n- Supertrend B/S is the confirmed trend authority.\n- Temporary opposite candle/realtime momentum no longer changes an established BUY/SELL trend.\n- UI separates TREND (BUY/SELL) from ENTRY (BUY/WAIT).\n- AUTO waits only when the confirmed trend remains valid but price is at an extreme and realtime momentum is pulling back.\n- Manual BUY/SELL remains unchanged.\n
+
+## v5.40.6 — AI Candle Live
+- Menambahkan pembacaan candle berjalan realtime berbasis body, upper wick, lower wick, posisi close, dan micro-direction.
+- Supertrend B/S tetap menjadi TREND authority.
+- Candle live hanya menentukan timing ENTRY: searah = boleh entry, berlawanan/netral = WAIT tanpa membalik TREND.
+- UI menampilkan body/wick/close position secara realtime.
+- Manual BUY/SELL tetap bebas.
