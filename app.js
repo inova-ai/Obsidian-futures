@@ -42,7 +42,7 @@ let lastLivePriceTs=0;
 function scheduleDraw(){if(drawRAF)return;drawRAF=requestAnimationFrame(()=>{drawRAF=0;safeDraw()})}
 function currentLiveSide(){const c=S.c.at(-1); if(!c)return 'WAIT'; const pred=AI_TREND?.side||'WAIT'; const candle=c.c>c.o?'BUY':c.c<c.o?'SELL':'WAIT'; if(pred!=='WAIT')return pred; return candle;}
 function entryGuard(side){if(MANUAL_ENTRY_STOP)return {ok:false,live:currentLiveSide(),reason:'STOP ENTRY aktif secara manual.'}; /* Manual BUY/SELL must never be blocked by WAIT or opposite live signal. ENTRY_GUARD is informational for manual trading; automatic entry remains disabled. */ return {ok:true,live:currentLiveSide()};}
-function updateEntryButtons(){const live=currentLiveSide(),stopped=MANUAL_ENTRY_STOP,guard=ENTRY_GUARD;const lb=$('long'),sb=$('short'),ql=$('quickLong'),qs=$('quickShort');[[lb,'BUY'],[ql,'BUY'],[sb,'SELL'],[qs,'SELL']].forEach(([b,side])=>{if(b){const blocked=stopped||(guard&&live!==side);b.disabled=blocked;b.classList.toggle('entryStopped',blocked);b.title=stopped?'STOP ENTRY aktif.':guard&&live!==side?`ENTRY GUARD: tunggu sinyal ${side}.`:'Manual entry siap.';}});const st=$('entryGuardStatus');if(st)st.textContent=stopped?'STOP ENTRY AKTIF · order baru dihentikan':guard?`ENTRY GUARD AKTIF · tombol mengikuti sinyal realtime ${live}`:`Manual entry bebas · sinyal ${live} hanya informasi`;if(st)st.className='note '+(live==='BUY'?'good':live==='SELL'?'bad':'wait');}
+function updateEntryButtons(){const live=currentLiveSide(),stopped=MANUAL_ENTRY_STOP,guard=ENTRY_GUARD;const lb=$('long'),sb=$('short'),ql=$('quickLong'),qs=$('quickShort');[[lb,'BUY'],[ql,'BUY'],[sb,'SELL'],[qs,'SELL']].forEach(([b,side])=>{if(b){const blocked=stopped;b.disabled=blocked;b.classList.toggle('entryStopped',blocked);b.title=stopped?'STOP ENTRY aktif.':'Manual entry bebas; signal realtime hanya informasi.';}});const st=$('entryGuardStatus');if(st)st.textContent=stopped?'STOP ENTRY AKTIF · order baru dihentikan':'MANUAL ENTRY BEBAS · BUY/SELL dikirim sesuai tombol; AUTO tetap memakai guard realtime';if(st)st.className='note '+(stopped?'bad':'good');}
 
 
 let MARKET_WS_BASE='wss://fstream.binance.com/market';
@@ -481,7 +481,7 @@ function updateAITrend(){
     }
   }
   const lb=$('aiLong'),sb=$('aiShort');
-  if(lb)lb.disabled=ENTRY_GUARD && t.side!=='BUY'; if(sb)sb.disabled=ENTRY_GUARD && t.side!=='SELL'; updateEntryButtons();
+  updateEntryButtons();
 }
 function signalTime(ts){return new Date(ts||Date.now()).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})+' WIB'}
 function nextCandleTime(ts){const ms=tfMillis(S.tf);return new Date(Math.floor((ts+ms)/ms)*ms).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})+' WIB'}
@@ -825,7 +825,12 @@ async function order(side,opts={}){
   if(S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0)return alert(`Masih ada posisi Binance ${Number(S.accountPosition.positionAmt)>0?'LONG':'SHORT'} ${Math.abs(Number(S.accountPosition.positionAmt)).toFixed(6)} BTC. Tutup posisi aktif dulu.`);
   const g=entryGuard(side);if(!g.ok){alert(g.reason);return}
   const fresh=getFinalSignal();
-  if(ENTRY_GUARD && fresh.side!==side){const msg=`ENTRY DITAHAN: signal realtime sekarang ${fresh.side} ${fresh.score||0}/100, bukan ${side}. Tunggu konfirmasi yang searah.`;setAutoStatus(msg,'wait');if(isAuto)throw Error(msg);return alert(msg)}
+  // Signal UI uses BUY/SELL while the order engine uses LONG/SHORT.
+  // Normalize both before comparing so a valid BUY signal is not rejected as 'not LONG'.
+  const freshOrderSide=fresh.side==='BUY'?'LONG':fresh.side==='SELL'?'SHORT':null;
+  // Manual BUY/SELL is intentionally not blocked by the signal guard. The button is the user's explicit direction.
+  // AUTO still requires the fresh realtime signal to match below.
+  if(isAuto && ENTRY_GUARD && freshOrderSide!==side){const shownSide=fresh.side||'WAIT';const msg=`AUTO DITAHAN: signal realtime sekarang ${shownSide} ${fresh.score||0}/100, bukan ${side==='LONG'?'BUY/LONG':side==='SHORT'?'SELL/SHORT':side}. Menunggu konfirmasi searah.`;setAutoStatus(msg,'wait');throw Error(msg)}
   const z=S.smart?.[side.toLowerCase()];if(!z)return alert('SL/TP belum siap');
   const entryType=String($('entryType')?.value||'MARKET').toUpperCase();
   const chosenUSDT=entryType==='LIMIT'?toUSDT(Number($('entryPrice')?.value||0)):Number(S.c.at(-1)?.c||0);
