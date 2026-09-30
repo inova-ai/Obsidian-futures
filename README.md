@@ -97,3 +97,10 @@ Replace the previous package with this ZIP. Keep the existing Binance credential
 - Close reconciliation uses the actual close order trades (`userTrades`) for executed price, realized PnL and USDT commission, then confirms position = 0 via positionRisk.
 - UI distinguishes unrealized PnL, realized PnL, close fee, and net realized result.
 - REST is reconciliation/fallback; it is not treated as the primary realtime account feed.
+
+
+## v5.40.3 Error Response Fix
+- Error response dari BUY/SELL sekarang dinormalisasi agar object tidak tampil sebagai `[object Object]`.
+- Detail error Binance ditampilkan apa adanya bila tersedia.
+- API entry memastikan field `error` selalu berupa string.
+- Tidak mengubah logika indikator Supertrend/B/S atau sizing/order execution.

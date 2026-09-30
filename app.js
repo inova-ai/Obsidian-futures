@@ -2,7 +2,18 @@
 const $=id=>document.getElementById(id),cv=$('chart'),ctx=cv.getContext('2d');
 let AUTH=sessionStorage.getItem('obsidian_token')||'';
 const H=()=>AUTH?{'content-type':'application/json','authorization':'Bearer '+AUTH}:{'content-type':'application/json'};
-async function jsonFetch(url,opts={}){const r=await fetch(url,opts);const text=await r.text();let data;try{data=JSON.parse(text)}catch{throw Error(`Server returned ${r.status} instead of JSON`)}if(r.status===401){try{sessionStorage.removeItem('obsidian_token')}catch{};AUTH=''}if(!r.ok&&data?.error)throw Error(data.error);return data}
+function readableError(value){
+  if(value==null)return 'Unknown error';
+  if(value instanceof Error)return value.message||String(value);
+  if(typeof value==='string')return value;
+  if(typeof value==='object'){
+    const direct=value.message||value.msg||value.error||value.detail||value.reason;
+    if(direct!==undefined&&direct!==value)return readableError(direct);
+    try{return JSON.stringify(value,null,2)}catch{return String(value)}
+  }
+  return String(value);
+}
+async function jsonFetch(url,opts={}){const r=await fetch(url,opts);const text=await r.text();let data;try{data=JSON.parse(text)}catch{throw Error(`Server returned ${r.status} instead of JSON`)}if(r.status===401){try{sessionStorage.removeItem('obsidian_token')}catch{};AUTH=''}if(!r.ok&&data?.error)throw Error(readableError(data.error));return data}
 async function ensureAuth(){try{let z=await jsonFetch('/api/auth/status');if(z.authenticated){return true}document.getElementById('authbar').style.display='flex';if(z.mode==='env'){document.getElementById('authmsg').textContent='Mode Vercel: Login memakai ADMIN_USERNAME/ADMIN_PASSWORD. Setup database dilewati.';document.getElementById('aset').disabled=true;document.getElementById('aset').title='Setup membutuhkan PostgreSQL';}return false}catch(e){document.getElementById('authmsg').textContent='API belum siap: '+e.message;document.getElementById('authbar').style.display='flex';return false}}
 let AI_TREND={side:'WAIT',score:0,reason:[],lastNotified:null,sr:null};
 let SR_STATE={support:null,resistance:null,context:'NO_LEVEL',distanceSupport:null,distanceResistance:null};
@@ -790,8 +801,9 @@ Lanjut entry?`;
   if(!isAuto&&!confirm(confirmText))return;
   const body={symbol:S.symbol,side,entry:preview.entryPrice,entryType,entryPrice:entryType==='LIMIT'?chosenUSDT:preview.entryPrice,stopLoss:z.sl,takeProfit:noTp?0:z.tp,capital:toUSDT(capitalIdr),riskPct,leverage,marginType:String($('margin')?.value||'Cross').toUpperCase(),sizingMode,expectedQuantity:Number(preview.finalQty),expectedNotional:Number(preview.finalNotional),setup:'structure+ATR',reason:isAuto?'ai-auto':'manual',profitMode:noTp?'TANPA_BATAS':'TARGET'};
   const target=mode==='paper'?'/api/paper/order':'/api/live/order';
-  const x=await jsonFetch(target,{method:'POST',headers:H(),body:JSON.stringify(body)}).catch(e=>({error:e.message,code:e.code}));
+  const x=await jsonFetch(target,{method:'POST',headers:H(),body:JSON.stringify(body)}).catch(e=>({error:readableError(e),code:e.code}));
   if(x.error){
+    x.error=readableError(x.error);
     $('orderResult').style.display='block';
     $('orderResult').innerHTML=`<b class="bad">ENTRY GAGAL · BINANCE</b><div class="note bad">${x.error}</div><div class="note">AUTO tidak akan menganggap sinyal ini sebagai posisi aktif. Jika sinyal masih valid, AUTO akan mencoba lagi setelah jeda.</div>`; LAST_ORDER_DIAGNOSTIC={at:Date.now(),html:$('orderResult').innerHTML,keepMs:12000};
     setAutoStatus(isAuto?`AUTO: ${x.error}`:'ENTRY MANUAL GAGAL: '+x.error,'bad');
@@ -840,7 +852,7 @@ async function closePosition(opts={}){
   const rt=await jsonFetch('/api/runtime').catch(e=>({error:e.message}));if(rt.error)return alert(rt.error);
   const mode=String(rt.tradingMode||'paper').toLowerCase();
   const x=await jsonFetch(mode==='paper'?'/api/paper/close':'/api/live/close',{method:'POST',headers:H(),body:JSON.stringify({symbol:S.symbol})}).catch(e=>({error:e.message}));
-  if(x.error){$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="bad">GAGAL MENUTUP</b><div class="note">${x.error}</div>`;if(opts.auto)throw Error(x.error);return alert(x.error)}
+  if(x.error){x.error=readableError(x.error);$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="bad">GAGAL MENUTUP</b><div class="note">${x.error}</div>`;if(opts.auto)throw Error(x.error);return alert(x.error)}
   const realized=Number(x.realizedPnl??x.pnl??0),fee=Number(x.commissionUSDT||0),net=Number(x.netRealizedAfterFee??(realized-fee)),delta=Number(x.walletDelta||0),after=Number(x.balanceAfter||0);$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="${net>=0?'good':'bad'}">POSISI DITUTUP · ${net>=0?'PROFIT':'LOSS'} BERSIH ${fmtIDR(net)}</b><div class="note">PnL terealisasi: <b>${fmtIDR(realized)}</b> · Fee close: <b>${fmtIDR(fee)}</b> · Harga eksekusi: <b>${x.exitPrice?fmtIDR(Number(x.exitPrice||0)):'—'}</b></div><div class="note">Saldo Binance setelah close: <b>${Number.isFinite(after)?fmtIDR(after):'—'}</b> · Perubahan wallet: <b>${fmtIDR(delta)}</b></div>`;
   S.accountPosition=null;scheduleDraw();
   for(let i=0;i<8;i++){
