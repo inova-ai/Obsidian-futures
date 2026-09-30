@@ -119,3 +119,11 @@ Replace the previous package with this ZIP. Keep the existing Binance credential
 - Candle live hanya menentukan timing ENTRY: searah = boleh entry, berlawanan/netral = WAIT tanpa membalik TREND.
 - UI menampilkan body/wick/close position secara realtime.
 - Manual BUY/SELL tetap bebas.
+
+
+## v5.40.8 — Premium Desktop/App Visual Skin
+- Tampilan utama diubah menjadi dashboard aplikasi trading premium bergaya dark navy/black.
+- Desktop mendapat sidebar aplikasi kiri, header market, chart utama, panel analisis kanan, dan kontrol trading yang lebih tegas.
+- Warna tombol BUY/LONG menggunakan emerald, SELL/SHORT menggunakan coral-red, kontrol aktif menggunakan gold/orange, mengikuti mockup visual yang diminta.
+- Mode HP tetap responsive: sidebar disembunyikan dan layout kembali menjadi satu kolom.
+- Tidak mengubah ID elemen trading atau logika entry/close; perubahan ini fokus pada visual/layout.
