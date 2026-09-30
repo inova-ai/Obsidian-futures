@@ -208,46 +208,43 @@ function renderAccountRealtimeSnapshot(){
 function connect(){closeMarketWS();const s=S.symbol.toLowerCase(),tf=S.tf;const streams=[`${s}@kline_${tf}`,`${s}@markPrice@1s`,`${s}@forceOrder`,`${s}@aggTrade`].join('/');const url=`${MARKET_WS_BASE.replace(/\/$/,'')}/stream?streams=${streams}`;let socket;try{socket=new WebSocket(url);wsMarket=socket}catch(e){$('conn').textContent='REST FALLBACK';startPolling();scheduleMarketReconnect();return}socket.onopen=()=>{if(wsMarket!==socket)return;marketWsConnected=true;lastMarketWsDataAt=Date.now();marketWsRetry=0;stopPolling();$('conn').textContent=publicWsConnected?'REALTIME · WS':'REALTIME · WS (MARKET)';$('conn').title='Binance Futures market WebSocket';safeDraw();chartStatus('REALTIME · Binance Futures WebSocket')};socket.onerror=()=>{if(wsMarket!==socket)return;marketWsConnected=false;$('conn').textContent='RECONNECTING…';$('conn').title='Market WebSocket error; REST fallback active'};socket.onclose=()=>{if(wsMarket!==socket)return;marketWsConnected=false;$('conn').textContent='RECONNECTING…';startPolling();scheduleMarketReconnect()};socket.onmessage=e=>{if(wsMarket!==socket)return;try{lastMarketWsDataAt=Date.now();const z=JSON.parse(e.data),d=z.data||z;if(!d)return;if(d.e==='kline'){const k=d.k,c={t:+k.t,o:+k.o,h:+k.h,l:+k.l,c:+k.c,v:+k.v},q=S.c.at(-1);if(q?.t===c.t){if(lastLivePriceTs>Date.now()-1500){c.c=q.c;c.h=Math.max(c.h,q.h);c.l=Math.min(c.l,q.l)}S.c[S.c.length-1]=c}else S.c.push(c);if(S.c.length>500)S.c.shift();$('price').textContent=fmtIDR(c.c);S.swings=swings(S.c);smart();calc();updateLiveSignal();scheduleDraw();if(k.x)recordClosedSignal(c)}else if(d.e==='markPriceUpdate'){S.market.mark=+d.p;S.market.index=+d.i;S.market.funding=+d.r;$('mark').textContent=fmtIDR(d.p);$('index').textContent=fmtIDR(d.i);$('funding').textContent=(+d.r*100).toFixed(4)+'%';scheduleDraw()}else if(d.e==='aggTrade'){const price=+d.p;if(Number.isFinite(price)){const q=S.c.at(-1);if(q){q.c=price;q.h=Math.max(q.h,price);q.l=Math.min(q.l,price);lastLivePriceTs=Date.now();$('price').textContent=fmtIDR(price);S.market.last=price;updateLiveSignal();scheduleDraw()}}}else if(d.e==='forceOrder'){$('liq').textContent=`${d.o?.S||''} ${fmt(+d.o?.p||0)} × ${fmt(+d.o?.q||0)}`;S.market.liq=d.o?.q||0}}catch{}}}
 function connectPublic(){closePublicWS();const s=S.symbol.toLowerCase();const streams=[`${s}@bookTicker`,`${s}@depth@100ms`].join('/');const url=`${PUBLIC_WS_BASE.replace(/\/$/,'')}/stream?streams=${streams}`;let socket;try{socket=new WebSocket(url);wsPublic=socket}catch{schedulePublicReconnect();return}socket.onopen=()=>{if(wsPublic!==socket)return;publicWsConnected=true;publicWsRetry=0;S.book.ready=false;S.book.buffer=[];syncDepthSnapshot();$('conn').textContent=marketWsConnected?'REALTIME · WS':'REALTIME · PUBLIC WS'};socket.onerror=()=>{if(wsPublic!==socket)return;publicWsConnected=false;$('conn').title='Public WebSocket error; reconnecting'};socket.onclose=()=>{if(wsPublic!==socket)return;publicWsConnected=false;S.book.ready=false;$('conn').textContent=marketWsConnected?'REALTIME · MARKET WS':'RECONNECTING…';schedulePublicReconnect()};socket.onmessage=e=>{if(wsPublic!==socket)return;try{const z=JSON.parse(e.data),d=z.data||z;if(!d)return;if(d.e==='bookTicker'){S.book.bid=+d.b;S.book.ask=+d.a;$('spread').textContent=fmt(+d.a-+d.b);scheduleDraw()}else if(d.e==='depthUpdate'){if(!S.book.ready){S.book.buffer.push(d);if(S.book.buffer.length>2000)S.book.buffer.shift()}else applyDepthUpdate(d)} }catch{}}}
 function tfMillis(tf){const m={1:60000,3:180000,5:300000,15:900000,30:1800000,1.0:3600000};if(tf.endsWith('m'))return Number(tf.slice(0,-1))*60000;if(tf.endsWith('h'))return Number(tf.slice(0,-1))*3600000;if(tf.endsWith('d'))return Number(tf.slice(0,-1))*86400000;return 300000}
-function hybridPredictiveCandle(closed, live){
-  const base=predictiveCandle(closed);
-  if(!live||!closed?.length)return base;
-  const last=closed.at(-1), atr=ATR(closed).at(-1)||Math.abs(last.c-last.o)||1;
-  const range=Math.max(1e-12,live.h-live.l), body=Math.abs(live.c-live.o);
-  const upper=live.h-Math.max(live.o,live.c), lower=Math.min(live.o,live.c)-live.l;
-  const bodyRatio=body/range, upperRatio=upper/range, lowerRatio=lower/range;
-  const move=(live.c-last.c)/Math.max(atr,1e-12);
-  let bull=base.bull,bear=base.bear,reason=[...base.reason];
-  // Live candle is an early-warning layer only. It is deliberately capped so
-  // one/two ticks cannot overturn the closed-candle structure.
-  if(lowerRatio>=.55 && move<=.35){bull+=7;bear-=3;reason.push('Realtime lower-wick support');}
-  if(upperRatio>=.55 && move>=-.35){bear+=7;bull-=3;reason.push('Realtime upper-wick resistance');}
-  if(bodyRatio>=.60 && Math.abs(move)>=.25){
-    if(live.c>live.o){bull+=6;reason.push('Realtime bullish pressure');}
-    else if(live.c<live.o){bear+=6;reason.push('Realtime bearish pressure');}
-  }
-  bull=Math.max(0,Math.min(100,bull)); bear=Math.max(0,Math.min(100,bear));
-  const gap=Math.abs(bull-bear),score=Math.max(bull,bear);
+function getConfirmedSignal(){
+  const closed=S.c.slice(0,-1);
+  return predictiveCandle(closed.length?closed:S.c);
+}
+function getRealtimeMomentum(){
+  const live=S.c.at(-1), closed=S.c.slice(0,-1);
+  if(!live||closed.length<30)return {side:'WAIT',score:0,bull:0,bear:0,gap:0,strength:'LOW',reason:['Menunggu data realtime']};
+  const closes=closed.map(x=>x.c), closesLive=[...closes,live.c];
+  const e9=EMA(closesLive,9), e21=EMA(closesLive,21), atrArr=ATR(closed), atr=Number(atrArr.at(-1)||Math.abs(live.c-live.o)||1);
+  const move=(live.c-closed.at(-1).c)/Math.max(atr,1e-12);
+  const body=Math.abs(live.c-live.o), range=Math.max(1e-12,live.h-live.l), bodyPct=body/range;
+  const prior=closed.slice(-12), avgVol=prior.reduce((a,x)=>a+Number(x.v||0),0)/Math.max(1,prior.length), volRatio=avgVol?Number(live.v||0)/avgVol:1;
+  let bull=0,bear=0,reason=[];
+  if(live.c>live.o){bull+=25;reason.push('Candle berjalan bullish');}
+  else if(live.c<live.o){bear+=25;reason.push('Candle berjalan bearish');}
+  if(move>.18){bull+=20;reason.push('Harga naik dari close sebelumnya');}
+  else if(move<-.18){bear+=20;reason.push('Harga turun dari close sebelumnya');}
+  if(e9.at(-1)>e21.at(-1)){bull+=18;reason.push('EMA realtime bullish');}
+  else if(e9.at(-1)<e21.at(-1)){bear+=18;reason.push('EMA realtime bearish');}
+  if(bodyPct>=.55){if(live.c>live.o)bull+=12;else if(live.c<live.o)bear+=12;}
+  if(volRatio>=1.15){if(live.c>live.o){bull+=10;reason.push('Volume mendukung BUY');}else if(live.c<live.o){bear+=10;reason.push('Volume mendukung SELL');}}
+  const lower=(Math.min(live.o,live.c)-live.l)/range, upper=(live.h-Math.max(live.o,live.c))/range;
+  if(lower>=.55){bull+=7;reason.push('Rejection bawah');}
+  if(upper>=.55){bear+=7;reason.push('Rejection atas');}
+  bull=Math.min(100,Math.max(0,bull)); bear=Math.min(100,Math.max(0,bear));
+  const score=Math.max(bull,bear),gap=Math.abs(bull-bear);
   let side='WAIT';
-  const twoSidedConflict = bull>=48 && bear>=48 && gap<5;
-  // Realtime confirmation uses the same quality gate as the frozen Signal Drop.
-  const strongBull = bull>=68 && gap>=12 && Number(base.confirmations||0)>=4;
-  const strongBear = bear>=68 && gap>=12 && Number(base.confirmations||0)>=4;
-  if(!twoSidedConflict && strongBull)side='BUY';
-  else if(!twoSidedConflict && strongBear)side='SELL';
-  else reason.push(twoSidedConflict?'Realtime conflict → WAIT':'Realtime belum cukup kuat: skor ≥68, gap ≥12, dan ≥4 konfirmasi → WAIT');
-  return {...base,side,score,bull,bear,gap,reason:reason.slice(-8),strength:score>=78?'HIGH':score>=62?'MEDIUM':'LOW'};
+  if(bull>=58&&gap>=8)side='BUY'; else if(bear>=58&&gap>=8)side='SELL';
+  return {side,score,bull,bear,gap,strength:score>=78?'HIGH':score>=60?'MEDIUM':'LOW',reason:reason.slice(-6),volumeRatio,move};
 }
 function getFinalSignal(){
   const c=S.c.at(-1);
   if(!c)return {side:'WAIT',score:0,gap:0,strength:'LOW',reason:['Menunggu data candle'],final:true};
-  const ms=tfMillis(S.tf);
-  const live=Date.now()>=Number(c.t)&&Date.now()<Number(c.t)+ms;
+  const t=getConfirmedSignal();
+  const ms=tfMillis(S.tf), live=Date.now()>=Number(c.t)&&Date.now()<Number(c.t)+ms;
   const anchor=live&&S.c.length>1?S.c.at(-2):c;
-  const targetTs=anchor?Number(anchor.t)+ms:null;
-  const closed=live&&S.c.length>1?S.c.slice(0,-1):S.c;
-  // SINGLE SOURCE OF TRUTH: every live signal in the UI uses this exact calculation.
-  const t=live&&S.c.length>1?hybridPredictiveCandle(closed,c):predictiveCandle(closed);
-  return {...t,final:true,targetTs:targetTs||null,anchorTs:anchor?.t||null,live};
+  return {...t,final:true,targetTs:Number(anchor.t)+ms,anchorTs:Number(anchor.t),live,momentum:live?getRealtimeMomentum():null};
 }
 function syncPendingFinalSignal(){
   if(!S.c.length)return;
@@ -260,7 +257,7 @@ function syncPendingFinalSignal(){
   const changed=row.side!==next.side||Number(row.score)!==next.score||Number(row.gap)!==next.gap||row.strength!==next.strength||JSON.stringify(row.reason)!==JSON.stringify(next.reason);
   if(changed){SIGNALS[idx]=next;persistSignals();renderSignalDrop();renderFutureForecast();}
 }
-function updateLiveSignal(){if(!S.c.length)return;const c=S.c.at(-1),t=getFinalSignal();const dir=c.c>c.o?'NAIK · B':c.c<c.o?'TURUN · S':'DATAR';const box=$('liveSignalBox'),sig=$('liveEntrySignal'),score=$('liveSignalScore'),cd=$('candleCountdown'),ct=$('candleTime'),clock=$('liveClock'),cdir=$('liveCandleDirection'),cprice=$('liveCandlePrice'),ls=$('signalLiveSide'),lm=$('signalLiveMeta');if(sig){sig.textContent=t.side==='BUY'?'BUY':t.side==='SELL'?'SELL':'WAIT';sig.className='signal '+(t.side==='BUY'?'good':t.side==='SELL'?'bad':'wait')}if(score)score.textContent=`FINAL SIGNAL · ${t.score||0}/100 · ${t.strength||'LOW'} · ${t.confirmations||0} KONF · ${(t.reason||['Belum cukup konfirmasi']).slice(0,2).join(' · ')}`;if(box)box.className='liveBox '+(t.side==='BUY'?'signalBuy':t.side==='SELL'?'signalSell':'signalWait');if(cdir){cdir.textContent=dir;cdir.className=''+(dir.startsWith('NAIK')?'good':dir.startsWith('TURUN')?'bad':'wait')}if(cprice)cprice.textContent=`${fmtIDR(c.c)} · Buka ${fmtIDR(c.o)}`;const ms=tfMillis(S.tf),remain=Math.max(0,(c.t+ms)-Date.now()),sec=Math.floor(remain/1000),mm=String(Math.floor(sec/60)).padStart(2,'0'),ss=String(sec%60).padStart(2,'0');if(cd)cd.textContent=`${mm}:${ss}`;if(ct)ct.textContent=`Candle ${new Date(c.t).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})}–${new Date(c.t+ms).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})} WIB`;if(clock)clock.textContent=new Date().toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit',second:'2-digit'});if(ls){ls.textContent=t.side==='BUY'?'BUY ↑':t.side==='SELL'?'SELL ↓':'WAIT •';ls.className='signalSide '+(t.side==='BUY'?'good':t.side==='SELL'?'bad':'wait')}if(lm)lm.textContent=`FINAL ${t.side} · ${t.score||0}/100 · ${t.confirmations||0} KONF · ${dir} · alasan: ${(t.reason||['—']).slice(0,2).join(' / ')}`;AI_TREND=t; syncPendingFinalSignal(); updateEntryButtons()}
+function updateLiveSignal(){if(!S.c.length)return;const c=S.c.at(-1),t=getFinalSignal(),m=t.momentum||getRealtimeMomentum();const dir=c.c>c.o?'NAIK · B':c.c<c.o?'TURUN · S':'DATAR';const box=$('liveSignalBox'),sig=$('liveEntrySignal'),score=$('liveSignalScore'),cd=$('candleCountdown'),ct=$('candleTime'),clock=$('liveClock'),cdir=$('liveCandleDirection'),cprice=$('liveCandlePrice'),ls=$('signalLiveSide'),lm=$('signalLiveMeta'),msig=$('liveMomentumSignal'),mscore=$('liveMomentumScore'),mbox=$('liveMomentumBox');if(sig){sig.textContent=t.side==='BUY'?'BUY':t.side==='SELL'?'SELL':'WAIT';sig.className='signal '+(t.side==='BUY'?'good':t.side==='SELL'?'bad':'wait')}if(score)score.textContent=`CONFIRMED · ${t.score||0}/100 · ${t.strength||'LOW'} · ${t.confirmations||0} KONF · ${(t.reason||['Belum cukup konfirmasi']).slice(0,2).join(' · ')}`;if(box)box.className='liveBox '+(t.side==='BUY'?'signalBuy':t.side==='SELL'?'signalSell':'signalWait');if(msig){msig.textContent=m.side==='BUY'?'BUY ↑':m.side==='SELL'?'SELL ↓':'WAIT •';msig.className='signal '+(m.side==='BUY'?'good':m.side==='SELL'?'bad':'wait')}if(mscore)mscore.textContent=`REALTIME MOMENTUM · ${m.score||0}/100 · ${(m.reason||['Menunggu momentum']).slice(0,2).join(' · ')}`;if(mbox)mbox.className='liveBox '+(m.side==='BUY'?'signalBuy':m.side==='SELL'?'signalSell':'signalWait');if(cdir){cdir.textContent=dir;cdir.className=''+(dir.startsWith('NAIK')?'good':dir.startsWith('TURUN')?'bad':'wait')}if(cprice)cprice.textContent=`${fmtIDR(c.c)} · Buka ${fmtIDR(c.o)}`;const ms=tfMillis(S.tf),remain=Math.max(0,(c.t+ms)-Date.now()),sec=Math.floor(remain/1000),mm=String(Math.floor(sec/60)).padStart(2,'0'),ss=String(sec%60).padStart(2,'0');if(cd)cd.textContent=`${mm}:${ss}`;if(ct)ct.textContent=`Candle ${new Date(c.t).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})}–${new Date(c.t+ms).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})} WIB`;if(clock)clock.textContent=new Date().toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit',second:'2-digit'});if(ls){ls.textContent=t.side==='BUY'?'BUY ↑':t.side==='SELL'?'SELL ↓':'WAIT •';ls.className='signalSide '+(t.side==='BUY'?'good':t.side==='SELL'?'bad':'wait')}if(lm)lm.textContent=`CONFIRMED ${t.side} · MOMENTUM ${m.side} · ${m.score||0}/100 · ${dir} · ${(m.reason||['—']).slice(0,2).join(' / ')}`;AI_TREND=t; syncPendingFinalSignal(); updateEntryButtons()}
 function fmtDuration(ms){if(!Number.isFinite(ms)||ms<0)return '—';const sec=Math.floor(ms/1000),d=Math.floor(sec/86400),h=Math.floor(sec%86400/3600),m=Math.floor(sec%3600/60),ss=sec%60;return (d?d+'h ':'')+String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(ss).padStart(2,'0')}
 function updateLivePositionHero(p){
   const hero=$('livePositionHero'),badge=$('liveHeroBadge'); if(!hero||!badge)return;
@@ -614,17 +611,58 @@ function projectFutureSignals(){
   }
   return out;
 }
+function signalCountdown(ts){
+  const remain=Math.max(0,Number(ts||0)-Date.now());
+  const sec=Math.floor(remain/1000),mm=String(Math.floor(sec/60)).padStart(2,'0'),ss=String(sec%60).padStart(2,'0');
+  return `${mm}:${ss}`;
+}
 function renderFutureForecast(){
   const el=$('forecastFeed');if(!el)return;
-  const tf=$('signalTf')?.value||S.tf, ms=tfMillis(tf), now=Date.now();
-  const last=S.c.at(-1);
-  const live=last && now>=Number(last.t) && now<Number(last.t)+ms;
+  const tf=$('signalTf')?.value||S.tf,ms=tfMillis(tf),now=Date.now(),last=S.c.at(-1);
+  const live=last&&now>=Number(last.t)&&now<Number(last.t)+ms;
   const anchor=live?S.c.at(-2):last;
   const next=anchor?SIGNALS.find(x=>x.symbol===S.symbol&&x.tf===tf&&Number(x.targetTs)===Number(anchor.t)+ms):null;
-  const rows=SIGNALS.filter(x=>x.symbol===S.symbol&&x.tf===tf&&x.status==='CLOSED').slice(0,12);
-  const nextHtml=next?`<div class="nextSignalCard"><div class="nextSignalTitle">NEXT CANDLE · ${signalTime(next.targetTs)}</div><div class="nextSignalMain"><b class="nextSide ${next.side==='BUY'?'buy':next.side==='SELL'?'sell':'wait'}">${next.side==='BUY'?'BUY ↑':next.side==='SELL'?'SELL ↓':'WAIT •'}</b><span>${next.score}/100 · ${next.strength}</span></div><div class="nextReason">${next.reason?.slice(0,3).map(x=>'• '+x).join('<br>')||'Struktur belum cukup dominan.'}</div></div>`:'<div class="note">Menunggu candle close untuk membekukan prediksi candle berikutnya…</div>';
-  const historyHtml=rows.length?`<div class="historyTitle">HASIL SIGNAL DROP</div>`+rows.map(x=>`<div class="resultRow"><span>${signalTime(x.targetTs)}</span><b class="${x.side==='BUY'?'buy':x.side==='SELL'?'sell':'wait'}">${x.side}</b><span class="${x.outcome==='HIT'?'hit':x.outcome==='MISS'?'miss':'neutral'}">${x.outcome==='HIT'?'✓ HIT':x.outcome==='MISS'?'✕ MISS':'• NETRAL'}</span></div>`).join(''):'<div class="note">Belum ada hasil evaluasi.</div>';
-  el.innerHTML=nextHtml+historyHtml;
+  const rows=SIGNALS.filter(x=>x.symbol===S.symbol&&x.tf===tf&&x.status==='CLOSED').slice(0,16);
+  const liveFinal=getFinalSignal();
+  const nextSide=next?.side||liveFinal.side||'WAIT';
+  const target=next?.targetTs||(last?Number(last.t)+ms:Date.now()+ms);
+  const label=nextSide==='BUY'?'BUY ↑':nextSide==='SELL'?'SELL ↓':'WAIT •';
+  const meta=next?`${next.score}/100 · ${next.strength} · ${(next.reason||'').slice(0,90)}`:`Realtime ${liveFinal.score||0}/100 · ${liveFinal.strength||'LOW'}`;
+  const rowsHtml=rows.map(x=>{
+    const b=x.side==='BUY',s=x.side==='SELL',dir=b?'B':s?'S':'W',cls=b?'buy':s?'sell':'wait';
+    const outcome=x.outcome==='HIT'?'✓ HIT':x.outcome==='MISS'?'✕ MISS':x.outcome==='NEUTRAL'?'• NETRAL':'… PENDING';
+    const oc=x.outcome==='HIT'?'hit':x.outcome==='MISS'?'miss':x.status==='PENDING'?'pending':'neutral';
+    const action=b?'MASUK LONG':s?'MASUK SHORT':'SKIP';
+    return `<div class="sdRow"><span class="sdTime">${signalTime(x.targetTs||x.ts).replace(' WIB','')}</span><b class="sdDir ${cls}">${dir}</b><span class="sdLabel">${action} · ${outcome}</span><span class="sdScore">${x.score}/100</span></div>`;
+  }).join('');
+  el.innerHTML=`<div class="sdNext"><div class="sdNextTitle">NEXT CANDLE · ${signalTime(target)}</div><div class="sdNextMain"><b class="sdNextSide ${nextSide==='BUY'?'buy':nextSide==='SELL'?'sell':'wait'}">${label}</b><b id="signalCountdown" class="sdCountdown">${signalCountdown(target)}</b></div><div class="sdNextMeta">${meta}</div></div><div class="sdRowsTitle">SIGNAL HISTORY · ${tf}</div>${rowsHtml||'<div class="note">Belum ada histori signal. Menunggu candle close.</div>'}`;
+  renderSignalDropLiveOnly();
+}
+function renderSignalDropLiveOnly(){
+  const liveFinal=getFinalSignal(),side=liveFinal.side==='BUY'?'BUY ↑':liveFinal.side==='SELL'?'SELL ↓':'WAIT •';
+  const el=$('signalLiveSide');if(el){el.textContent=`LIVE · ${side}`;el.className=liveFinal.side==='BUY'?'good':liveFinal.side==='SELL'?'bad':'wait'}
+  const meta=$('signalLiveMeta');if(meta)meta.textContent=`${liveFinal.score||0}/100 · ${liveFinal.strength||'LOW'} · ${S.tf} · ${liveFinal.confirmations||0} KONF`;
+}
+function updateSignalDropCountdown(){
+  const el=$('signalCountdown');if(!el)return;
+  const tf=$('signalTf')?.value||S.tf,ms=tfMillis(tf),now=Date.now(),last=S.c.at(-1);
+  const live=last&&now>=Number(last.t)&&now<Number(last.t)+ms,anchor=live?S.c.at(-2):last;
+  const target=anchor?Number(anchor.t)+ms:now+ms;
+  el.textContent=signalCountdown(target);
+  if(target<=now)renderFutureForecast();
+}
+function renderSignalDrop(){
+  const el=$('signalFeed');
+  const tf=$('signalTf')?.value||S.tf;
+  if(el){
+    const rows=SIGNALS.filter(x=>x.symbol===S.symbol&&x.tf===tf).slice(0,80);
+    const done=rows.filter(x=>x.status&&x.status!=='PENDING');
+    const hit=done.filter(x=>x.outcome==='HIT').length,miss=done.filter(x=>x.outcome==='MISS').length;
+    const rate=hit+miss?Math.round(hit/(hit+miss)*100):null;
+    if($('signalCount'))$('signalCount').textContent=`${rows.length} sinyal${rate!=null?' · '+rate+'% HIT':''}`;
+    el.innerHTML='';
+  }
+  renderFutureForecast();
 }
 function actualCandleSide(c){
   if(!c)return 'NEUTRAL';
@@ -635,25 +673,6 @@ function actualCandleSide(c){
 function outcomeForPrediction(pred,actual){
   if(!pred||pred==='WAIT'||actual==='NEUTRAL')return 'NEUTRAL';
   return pred===actual?'HIT':'MISS';
-}
-function renderSignalDrop(){
-  const el=$('signalFeed');
-  if(!el)return;
-  const tf=$('signalTf')?.value||S.tf;
-  const rows=SIGNALS.filter(x=>x.symbol===S.symbol&&x.tf===tf).slice(0,80);
-  const done=rows.filter(x=>x.status&&x.status!=='PENDING');
-  const hit=done.filter(x=>x.outcome==='HIT').length, miss=done.filter(x=>x.outcome==='MISS').length;
-  const rate=hit+miss?Math.round(hit/(hit+miss)*100):null;
-  $('signalCount').textContent=`${rows.length} sinyal${rate!=null?' · '+rate+'% HIT':''}`;
-  const liveFinal=getFinalSignal();
-  const liveCard=`<div class="signalRow finalLiveSignal"><div class="signalTop"><span class="signalTime">FINAL SIGNAL · REALTIME</span><span class="signalSide ${liveFinal.side==='BUY'?'good':liveFinal.side==='SELL'?'bad':'wait'}">${liveFinal.side==='BUY'?'BUY ↑':liveFinal.side==='SELL'?'SELL ↓':'WAIT •'}</span></div><div class="signalMeta">${liveFinal.score||0}/100 · ${liveFinal.strength||'LOW'} · ${(liveFinal.reason||['Menunggu data']).slice(0,3).map(x=>'• '+x).join(' ')}</div></div>`;
-  el.innerHTML=liveCard+(rows.length?rows.map(x=>{
-    const b=x.side==='BUY',s=x.side==='SELL',label=b?'B':s?'S':'W',cls=b?'good':s?'bad':'wait',arrow=b?'↑':s?'↓':'•';
-    const out=x.outcome==='HIT'?'✓ HIT':x.outcome==='MISS'?'✕ MISS':x.outcome==='NEUTRAL'?'• NETRAL':'… PENDING';
-    const outCls=x.outcome==='HIT'?'good':x.outcome==='MISS'?'bad':'wait';
-    return `<div class="signalRow"><div class="signalTop"><span class="signalTime">CLOSE ${signalTime(x.anchorTs||x.ts)} → NEXT ${signalTime(x.targetTs||x.ts)}</span><span class="signalSide ${cls}">${label} <span class="signalArrow">${arrow}</span></span></div><div class="signalMeta">Score ${x.score}/100 · ${x.strength} · ${out}${x.actual?` · Aktual: ${x.actual}`:''}</div></div>`
-  }).join(''):'<div class="note">Belum ada prediksi yang dibekukan. Menunggu candle close.</div>');
-  renderFutureForecast();
 }
 function persistSignals(){try{localStorage.setItem(SIGNAL_KEY,JSON.stringify(SIGNALS.slice(0,300)))}catch{}}
 function freezeNextCandlePrediction(anchor){
@@ -970,7 +989,7 @@ document.getElementById('signalTf')?.addEventListener('change',()=>renderSignalD
 document.getElementById('clearSignals')?.addEventListener('click',()=>{if(!confirm('Hapus riwayat Signal Drop untuk pair ini?'))return;SIGNALS=SIGNALS.filter(x=>x.symbol!==S.symbol);persistSignals();renderSignalDrop()});
 renderSignalDrop();
 ensureAuth();
-Promise.all([jsonFetch('/api/health'),jsonFetch('/api/runtime')]).then(([x,rt])=>{updateModeUI(rt);S.kill=!!x.killSwitch;$('kill').textContent=S.kill?'KILL ON':'KILL'}).catch(e=>{$('conn').textContent='API ERROR';$('conn').title=e.message});render();resize();load();setTimeout(()=>{resize();safeDraw()},250);setInterval(()=>{if(marketWsConnected&&Date.now()-lastMarketWsDataAt>5000){try{wsMarket?.close()}catch{}}},2000);setInterval(updateAITrend,1500);setInterval(updateLiveSignal,500);setInterval(tickLivePositionHero,1000);setInterval(mtf,5000);setInterval(()=>{renderFutureForecast()},1000);setInterval(autoProfitProtect,1000);setInterval(autoRecoverPendingSignal,2000);setInterval(scheduleLivePrediction,5000);depth();oiTimer=setInterval(depth,3000);accountTimer=setInterval(()=>{if(!accountWsConnected||Date.now()-lastAccountWsDataAt>4000)refreshAccount().catch(()=>{});},1000);
+Promise.all([jsonFetch('/api/health'),jsonFetch('/api/runtime')]).then(([x,rt])=>{updateModeUI(rt);S.kill=!!x.killSwitch;$('kill').textContent=S.kill?'KILL ON':'KILL'}).catch(e=>{$('conn').textContent='API ERROR';$('conn').title=e.message});render();resize();load();setTimeout(()=>{resize();safeDraw()},250);setInterval(()=>{if(marketWsConnected&&Date.now()-lastMarketWsDataAt>5000){try{wsMarket?.close()}catch{}}},2000);setInterval(updateAITrend,1500);setInterval(updateLiveSignal,500);setInterval(tickLivePositionHero,1000);setInterval(mtf,5000);setInterval(()=>{renderFutureForecast();updateSignalDropCountdown()},1000);setInterval(autoProfitProtect,1000);setInterval(autoRecoverPendingSignal,2000);setInterval(scheduleLivePrediction,5000);depth();oiTimer=setInterval(depth,3000);accountTimer=setInterval(()=>{if(!accountWsConnected||Date.now()-lastAccountWsDataAt>4000)refreshAccount().catch(()=>{});},1000);
 
 
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstallPrompt=e;const b=$('installPwa');if(b){b.style.display='inline-block';b.classList.add('pwaInstall')}});
