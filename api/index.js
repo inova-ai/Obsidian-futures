@@ -14,13 +14,14 @@ app.use((req,res,next)=>{res.setHeader('X-Content-Type-Options','nosniff');res.s
 app.use(express.json({limit:'1mb'})); 
 const rate=new Map();
 function rateLimit(req,res,next){const key=(req.ip||'unknown')+'|'+req.path,now=Date.now();let x=rate.get(key);if(!x||now-x.t>60000)x={t:now,n:0};x.n++;rate.set(key,x);if(x.n>120)return res.status(429).json({error:'Rate limit exceeded'});next()}
-app.get('/api',(req,res)=>res.json({ok:true,service:'obsidian-futures',version:'5.38.4-unified-realtime'}));
+app.get('/api',(req,res)=>res.json({ok:true,service:'obsidian-futures',version:'5.40.2-execution-sync'}));
 app.use('/api',rateLimit);
 
 const TRADING_MODE=String(process.env.TRADING_MODE|| (process.env.ENABLE_LIVE_TRADING==='true'?'live':'demo')).trim().toLowerCase();
 const IS_DEMO=TRADING_MODE==='demo', LIVE=TRADING_MODE==='live' && process.env.ENABLE_LIVE_TRADING==='true';
 const BASE=IS_DEMO?'https://demo-fapi.binance.com':(process.env.BINANCE_BASE_URL||'https://fapi.binance.com');
 const WS_BASE=IS_DEMO?'wss://demo-fstream.binance.com':(process.env.BINANCE_WS_URL||'wss://fstream.binance.com');
+const USER_WS_BASE=IS_DEMO?WS_BASE:(process.env.BINANCE_PRIVATE_WS_URL||'wss://fstream.binance.com/private');
 const MARKET_BASE=process.env.BINANCE_MARKET_BASE_URL||'https://fapi.binance.com';
 const MARKET_WS_BASE=process.env.BINANCE_MARKET_WS_URL||'wss://fstream.binance.com/market';
 const PUBLIC_WS_BASE=process.env.BINANCE_PUBLIC_WS_URL||'wss://fstream.binance.com/public';
@@ -167,12 +168,13 @@ app.get('/api/runtime',(_,r)=>r.json({
   binanceWs:WS_BASE,
   marketWs:MARKET_WS_BASE,
   publicWs:PUBLIC_WS_BASE,
-  userWs:WS_BASE,
+  userWs:USER_WS_BASE,
+  userWsMode:IS_DEMO?'legacy-listen-key':'private-routed',
   marketBase:MARKET_BASE,
   bybitBase:BYBIT_BASE
 }));
 
-app.get('/api/health',async(_,r)=>{try{let db='not-configured';if(pool){await ensureDb();db='postgres'}r.json({ok:true,version:'5.38.4-unified-realtime',live:LIVE,tradingMode:TRADING_MODE,binanceEnvironment:IS_DEMO?'demo':'live',binanceBase:BASE,binanceWs:WS_BASE,marketBase:MARKET_BASE,marketWs:MARKET_WS_BASE,publicWs:PUBLIC_WS_BASE,binanceCredentialsConfigured:!!(ENV_BINANCE_API_KEY&&ENV_BINANCE_API_SECRET),killSwitch:await getKillSwitch(),maxLeverage:MAXLEV,maxRiskPct:MAXRISK,dailyDrawdownPct:MAX_DD,db,auth:pool?'postgres':(ENV_ADMIN_USER&&ENV_ADMIN_PASSWORD?'env-admin':'unconfigured')})}catch(e){r.status(503).json({ok:false,db:'down',auth:ENV_ADMIN_USER&&ENV_ADMIN_PASSWORD?'env-admin':'unconfigured',error:e.message})}});
+app.get('/api/health',async(_,r)=>{try{let db='not-configured';if(pool){await ensureDb();db='postgres'}r.json({ok:true,version:'5.40.2-execution-sync',live:LIVE,tradingMode:TRADING_MODE,binanceEnvironment:IS_DEMO?'demo':'live',binanceBase:BASE,binanceWs:WS_BASE,userWs:USER_WS_BASE,userWsMode:IS_DEMO?'legacy-listen-key':'private-routed',marketBase:MARKET_BASE,marketWs:MARKET_WS_BASE,publicWs:PUBLIC_WS_BASE,binanceCredentialsConfigured:!!(ENV_BINANCE_API_KEY&&ENV_BINANCE_API_SECRET),killSwitch:await getKillSwitch(),maxLeverage:MAXLEV,maxRiskPct:MAXRISK,dailyDrawdownPct:MAX_DD,db,auth:pool?'postgres':(ENV_ADMIN_USER&&ENV_ADMIN_PASSWORD?'env-admin':'unconfigured')})}catch(e){r.status(503).json({ok:false,db:'down',auth:ENV_ADMIN_USER&&ENV_ADMIN_PASSWORD?'env-admin':'unconfigured',error:e.message})}});
 app.get('/api/auth/status',async(qr,r)=>{try{if(pool){try{await ensureDb();const u=(await q('SELECT username FROM users WHERE id=1'))[0];return r.json({configured:!!u,authenticated:!!optionalAuth(qr),username:u?.username||null,mode:'postgres'})}catch(e){if(!ENV_ADMIN_USER||!ENV_ADMIN_PASSWORD)throw e}}if(!ENV_ADMIN_USER||!ENV_ADMIN_PASSWORD)throw Error('Authentication is not configured. Set ADMIN_USERNAME, ADMIN_PASSWORD and MASTER_KEY in Vercel.');r.json({configured:true,authenticated:!!optionalAuth(qr),username:ENV_ADMIN_USER,mode:'env'})}catch(e){r.status(503).json({error:e.message,code:'AUTH_NOT_CONFIGURED'})}});
 app.post('/api/auth/setup',async(qr,r)=>{try{if(!pool)throw Error('Database belum dikonfigurasi. Untuk mode Vercel tanpa database, isi ADMIN_USERNAME, ADMIN_PASSWORD dan MASTER_KEY lalu gunakan Login.');await ensureDb();if((await q('SELECT id FROM users WHERE id=1')).length)throw Error('User already configured');const username=String(qr.body.username||'admin').trim(),password=String(qr.body.password||'');if(!username||password.length<12)throw Error('Username required and password must be at least 12 characters');const ph=passwordHash(password);await exec('INSERT INTO users(id,username,salt,password_hash,created_at) VALUES(1,$1,$2,$3,$4)',[username,ph.salt,ph.hash,Date.now()]);await audit('AUTH_SETUP',username);const token=makeToken(username);r.json({token,username,expiresInSec:SESSION_TTL/1000,mode:'postgres'})}catch(e){r.status(400).json({error:e.message})}});
 app.post('/api/auth/login',async(qr,r)=>{try{const suppliedUser=String(qr.body.username||'').trim(),suppliedPass=String(qr.body.password||'');let username='';if(pool){try{await ensureDb();const u=(await q('SELECT * FROM users WHERE id=1'))[0];if(u){const got=crypto.scryptSync(suppliedPass,u.salt,64,{N:16384,r:8,p:1});if(!crypto.timingSafeEqual(got,Buffer.from(u.password_hash,'hex')))throw Error('Invalid credentials');username=u.username;const row=(await q('SELECT totp_enc FROM credentials WHERE id=1'))[0];if(row?.totp_enc&&String(qr.body.code||'').trim()!==totp(dec(row.totp_enc)))throw Error('Valid 2FA code required')}}catch(e){if(!ENV_ADMIN_USER||!ENV_ADMIN_PASSWORD||e.message==='Invalid credentials'||e.message==='Valid 2FA code required')throw e}}if(!username){if(!ENV_ADMIN_USER||!ENV_ADMIN_PASSWORD)throw Error('Run setup first or configure ADMIN_USERNAME and ADMIN_PASSWORD in Vercel');if(suppliedUser!==ENV_ADMIN_USER||suppliedPass!==ENV_ADMIN_PASSWORD)throw Error('Invalid credentials');username=ENV_ADMIN_USER}const token=makeToken(username);if(pool)await audit('AUTH_LOGIN',username);r.json({token,username,expiresInSec:SESSION_TTL/1000,mode:pool?'postgres':'env'})}catch(e){r.status(401).json({error:e.message})}});
@@ -236,7 +238,8 @@ app.get('/api/user-stream',auth,async(_,r)=>{
     const d=await rr.json().catch(()=>({}));
     if(!rr.ok||!d.listenKey)throw Error(d.msg||`ListenKey HTTP ${rr.status}`);
     r.setHeader('Cache-Control','no-store');
-    r.json({ok:true,listenKey:d.listenKey,userWs:WS_BASE,expiresInMs:55*60*1000,updatedAt:Date.now()});
+    r.json({ok:true,listenKey:d.listenKey,userWs:USER_WS_BASE,
+  userWsMode:IS_DEMO?'legacy-listen-key':'private-routed',expiresInMs:55*60*1000,updatedAt:Date.now()});
   }catch(e){r.status(400).json({error:e.message})}
 });
 app.put('/api/user-stream',auth,async(_,r)=>{
@@ -277,28 +280,36 @@ app.post('/api/live/close',auth,async(qr,r)=>{try{
   const side=amt>0?'SELL':'BUY',qty=Math.abs(amt);
   const info=await binance('/fapi/v1/exchangeInfo',{},'GET',true),meta=info.symbols.find(x=>x.symbol===s),lot=meta?.filters?.find(x=>x.filterType==='LOT_SIZE');
   const step=+(lot?.stepSize||'0.001'),q=decimalFloor(qty,step); if(q<=0)throw Error('Quantity posisi tidak valid.');
-  const closeStarted=Date.now()-2000;
   const [algoCancel,regularCancel]=await Promise.all([cancelSymbolAlgoOrders(s),cancelSymbolRegularOrders(s)]);
+  const closeStarted=Date.now();
   const out=await binance('/fapi/v1/order',{symbol:s,side,type:'MARKET',quantity:decimalString(q,step),reduceOnly:'true',newOrderRespType:'RESULT'},'POST',true);
-  let finalPos=null,afterBal=null,income=[];
-  for(let i=0;i<16;i++){
+  const closeOrderId=Number(out.orderId||0);
+  let finalPos=null,afterBal=null,income=[],tradeFills=[];
+  for(let i=0;i<20;i++){
     await new Promise(resolve=>setTimeout(resolve,250));
-    const [pp,bb,ii]=await Promise.all([
+    const [pp,bb,ii,tr]=await Promise.all([
       binance('/fapi/v3/positionRisk',{symbol:s},'GET',true),
       binance('/fapi/v3/balance',{},'GET',true),
-      binance('/fapi/v1/income',{incomeType:'REALIZED_PNL',symbol:s,startTime:closeStarted,limit:50},'GET',true).catch(()=>[])
+      binance('/fapi/v1/income',{incomeType:'REALIZED_PNL',symbol:s,startTime:Math.max(0,closeStarted-1000),limit:100},'GET',true).catch(()=>[]),
+      closeOrderId?binance('/fapi/v1/userTrades',{symbol:s,orderId:closeOrderId,limit:100},'GET',true).catch(()=>[]):Promise.resolve([])
     ]);
     finalPos=(Array.isArray(pp)?pp.find(x=>Math.abs(Number(x.positionAmt||0))>0):null)||null;
-    afterBal=(Array.isArray(bb)?bb:[]).find(x=>x.asset==='USDT')||{}; income=Array.isArray(ii)?ii:[];
-    if(!finalPos)break;
+    afterBal=(Array.isArray(bb)?bb:[]).find(x=>x.asset==='USDT')||{}; income=Array.isArray(ii)?ii:[]; tradeFills=Array.isArray(tr)?tr:[];
+    if(!finalPos && tradeFills.length)break;
+    if(!finalPos && String(out.status||'').toUpperCase()==='FILLED' && i>=3)break;
   }
   if(finalPos)throw Error(`Binance belum melaporkan posisi ${s} = 0 setelah close. Posisi aktual masih ${finalPos.positionAmt}.`);
-  const realizedRows=income.filter(x=>x.symbol===s&&Number(x.time||0)>=closeStarted).sort((a,b)=>Number(a.time||0)-Number(b.time||0));
-  const realizedPnl=realizedRows.reduce((sum,x)=>sum+Number(x.income||0),0);
+  const realizedRows=income.filter(x=>x.symbol===s&&Number(x.time||0)>=Math.max(0,closeStarted-1000)).sort((a,b)=>Number(a.time||0)-Number(b.time||0));
+  const orderTrades=tradeFills.filter(x=>!closeOrderId||Number(x.orderId||0)===closeOrderId);
+  const realizedPnl=orderTrades.length?orderTrades.reduce((sum,x)=>sum+Number(x.realizedPnl||0),0):realizedRows.reduce((sum,x)=>sum+Number(x.income||0),0);
+  const commissionUSDT=orderTrades.reduce((sum,x)=>sum+(String(x.commissionAsset||'').toUpperCase()==='USDT'?Number(x.commission||0):0),0);
+  const filledQty=orderTrades.reduce((sum,x)=>sum+Number(x.qty||0),0)||Number(out.executedQty||q);
+  const weightedExit=orderTrades.reduce((sum,x)=>sum+Number(x.price||0)*Number(x.qty||0),0);
+  const exitPrice=filledQty>0&&weightedExit>0?weightedExit/filledQty:Number(out.avgPrice||p.markPrice||0);
   const balanceAfter=Number(afterBal?.balance||0),availableAfter=Number(afterBal?.availableBalance||0),walletDelta=balanceAfter-balanceBefore;
-  const entryPrice=Number(p.entryPrice||0),exitPrice=Number(out.avgPrice||p.markPrice||0),grossEstimate=(amt>0?1:-1)*(exitPrice-entryPrice)*q;
+  const entryPrice=Number(p.entryPrice||0),grossEstimate=(amt>0?1:-1)*(exitPrice-entryPrice)*filledQty;
   await audit('EXCHANGE_CLOSE',JSON.stringify({environment:IS_DEMO?'demo':'live',symbol:s,side,orderId:out.orderId,qty:q,realizedPnl,walletDelta,balanceBefore,balanceAfter,algoCancel,regularCancel}),qr.user);
-  r.json({ok:true,mode:TRADING_MODE,exitPrice,entryPrice,quantity:q,grossEstimate,realizedPnl,walletDelta,balanceBefore,balanceAfter,availableBefore,availableAfter,positionClosed:true,order:out,realizedIncome:realizedRows,canceled:{algo:algoCancel,regular:regularCancel}});
+  r.json({ok:true,mode:TRADING_MODE,exitPrice,entryPrice,quantity:filledQty,grossEstimate,realizedPnl,commissionUSDT,netRealizedAfterFee:realizedPnl-commissionUSDT,walletDelta,balanceBefore,balanceAfter,availableBefore,availableAfter,positionClosed:true,order:out,realizedIncome:realizedRows,tradeFills:orderTrades,canceled:{algo:algoCancel,regular:regularCancel}});
 }catch(e){r.status(400).json({error:e.message,code:e.code||'CLOSE_ERROR'})}});
 app.post('/api/live/order',auth,async(qr,r)=>{try{
   if(TRADING_MODE==='paper'||(TRADING_MODE==='live'&&!LIVE))throw Error('Exchange trading is disabled. Set TRADING_MODE=demo for Binance Demo or TRADING_MODE=live with ENABLE_LIVE_TRADING=true.');
