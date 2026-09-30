@@ -47,7 +47,8 @@ function updateEntryButtons(){const live=currentLiveSide(),stopped=MANUAL_ENTRY_
 
 let MARKET_WS_BASE='wss://fstream.binance.com/market';
 let PUBLIC_WS_BASE='wss://fstream.binance.com/public';
-let USER_WS_BASE='wss://fstream.binance.com';
+let USER_WS_BASE='wss://fstream.binance.com/private';
+let USER_WS_MODE='private-routed';
 let wsAccount=null,accountWsConnected=false,accountWsRetry=0,accountWsKeepalive=null,lastAccountWsDataAt=0,accountWsConnecting=false;
 let USDT_IDR_RATE=16500;
 let ORDER_FILTERS={stepSize:0.001,minQty:0,maxQty:0,tickSize:0.01};
@@ -80,76 +81,103 @@ function ADX(a,n=14){let tr=[],pdm=[],mdm=[];for(let i=0;i<a.length;i++){if(!i){
 function swings(a,depth=3){let hi=[],lo=[];for(let i=depth;i<a.length-depth;i++){let H=true,L=true;for(let j=1;j<=depth;j++){H&&=(a[i].h>a[i-j].h&&a[i].h>=a[i+j].h);L&&=(a[i].l<a[i-j].l&&a[i].l<=a[i+j].l)}if(H)hi.push(i);if(L)lo.push(i)}return{hi,lo}}
 function resize(){const r=cv.getBoundingClientRect(),w=Math.max(1,Math.floor(r.width)),h=Math.max(1,Math.floor(r.height)),d=Math.max(1,Math.min(3,window.devicePixelRatio||1));cv.width=Math.floor(w*d);cv.height=Math.floor(h*d);cv.style.width=w+'px';cv.style.height=h+'px';ctx.setTransform(d,0,0,d,0,0);safeDraw()}addEventListener('resize',()=>requestAnimationFrame(resize));
 function chartStatus(message,show=true){const el=$('chartStatus');if(!el)return;el.textContent=message;el.style.display=show?'flex':'none'}
-function safeDraw(){try{if(!cv.clientWidth||!cv.clientHeight)return;draw();if(S.c.length)chartStatus('',false)}catch(e){const el=$('conn');if(el){el.textContent='CHART ERROR';el.title=e?.stack||e?.message||String(e)}chartStatus('Chart error: '+(e?.message||String(e)))}}
+function safeDraw(){
+  try{
+    if(!cv||!ctx||!cv.clientWidth||!cv.clientHeight)return;
+    draw();
+    if(S.c.length)chartStatus('',false);
+  }catch(e){
+    const msg=String(e?.message||e||'Unknown chart error');
+    const el=$('conn');
+    if(el){el.textContent='CHART ERROR';el.title=msg;}
+    chartStatus('Chart error: '+msg);
+    try{
+      ctx.clearRect(0,0,cv.clientWidth,cv.clientHeight);
+      ctx.fillStyle='#070b11';ctx.fillRect(0,0,cv.clientWidth,cv.clientHeight);
+      ctx.fillStyle='#ff7189';ctx.font='bold 13px system-ui';ctx.fillText('Chart gagal dirender',16,28);
+      ctx.fillStyle='#9aa8b8';ctx.font='11px system-ui';ctx.fillText('Memulihkan chart realtime…',16,48);
+    }catch{}
+  }
+}
 function draw(){
   if(!cv||!ctx)return;
-  const r=priceMap(); const {w,h,a,dx,py,start,hi,lo}=r;
+  const r=priceMap();
+  const {w,h,a,dx,py,start,hi,lo}=r;
   ctx.clearRect(0,0,w,h);
-  ctx.fillStyle='#070b11'; ctx.fillRect(0,0,w,h);
+  ctx.fillStyle='#070b11';ctx.fillRect(0,0,w,h);
   if(!a.length){ctx.fillStyle='#718096';ctx.font='12px system-ui';ctx.fillText('Menunggu data market…',16,24);return;}
+
+  // Grid + price scale
   ctx.strokeStyle='#16202c';ctx.lineWidth=1;
   for(let i=0;i<5;i++){const y=20+i*(h-52)/4;ctx.beginPath();ctx.moveTo(42,y);ctx.lineTo(w-8,y);ctx.stroke();}
   ctx.font='9px system-ui';ctx.fillStyle='#718096';
-  for(let i=0;i<5;i++){const price=r.lo+(r.hi-r.lo)*(1-i/4);const y=20+i*(h-52)/4;ctx.fillText(fmtIDR(price),4,y+3);}
+  for(let i=0;i<5;i++){const price=lo+(hi-lo)*(1-i/4),y=20+i*(h-52)/4;ctx.fillText(fmtIDR(price),4,y+3);}
+
+  // Candles
   const bw=Math.max(2,Math.min(10,dx*.62));
-  a.forEach((c,i)=>{const x=45+i*dx,yo=py(c.o),yc=py(c.c),yh=py(c.h),yl=py(c.l),up=c.c>=c.o;
-    ctx.strokeStyle=up?'#19d39b':'#ff5b7c';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,yh);ctx.lineTo(x,yl);ctx.stroke();
-    ctx.fillStyle=up?'#19d39b':'#ff5b7c';const top=Math.min(yo,yc),bh=Math.max(1,Math.abs(yc-yo));ctx.fillRect(x-bw/2,top,bw,bh);
+  a.forEach((c,i)=>{
+    const x=45+i*dx,yo=py(c.o),yc=py(c.c),yh=py(c.h),yl=py(c.l),up=c.c>=c.o;
+    if(![x,yo,yc,yh,yl].every(Number.isFinite))return;
+    ctx.strokeStyle=up?'#19d39b':'#ff5b7c';ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(x,yh);ctx.lineTo(x,yl);ctx.stroke();
+    ctx.fillStyle=up?'#19d39b':'#ff5b7c';
+    const top=Math.min(yo,yc),bh=Math.max(1,Math.abs(yc-yo));ctx.fillRect(x-bw/2,top,bw,bh);
   });
-  // SINGLE INDICATOR: Supertrend + B/S flip markers.
+
+  // SINGLE INDICATOR ONLY: Supertrend + B/S flips.
   const st=supertrend(S.c,10,3);
-  if(st.line?.length){
-    const vals=st.line.slice(start);
-    ctx.save(); ctx.lineWidth=1.6;
-    vals.forEach((v,j)=>{ if(!Number.isFinite(v))return; const i=start+j; const x=45+j*dx,y=py(v); ctx.fillStyle=st.trend[i]>0?'#19d39b':'#ff5b7c'; ctx.beginPath(); ctx.arc(x,y,1.8,0,Math.PI*2); ctx.fill(); if(j){ const pv=vals[j-1]; if(Number.isFinite(pv)){ctx.strokeStyle=st.trend[i]>0?'#19d39b':'#ff5b7c';ctx.beginPath();ctx.moveTo(x-dx,py(pv));ctx.lineTo(x,y);ctx.stroke();}} });
-    ctx.font='bold 10px system-ui'; ctx.textAlign='center';
-    (st.flips||[]).filter(f=>f.i>=start&&f.i<a.length).forEach(f=>{const j=f.i-start,c=S.c[f.i],x=45+j*dx; const y=f.side==='BUY'?Math.max(14,py(c.l)-18):Math.min(h-42,py(c.h)+18); ctx.fillStyle=f.side==='BUY'?'#19d39b':'#ff5b7c'; ctx.fillText(f.side==='BUY'?'B':'S',x,y);});
-    ctx.restore(); ctx.textAlign='start';
+  if(Array.isArray(st.line)&&st.line.length){
+    ctx.save();ctx.lineWidth=1.7;
+    let prevX=null,prevY=null,prevDir=null;
+    for(let i=start;i<start+a.length;i++){
+      const v=Number(st.line[i]);
+      if(!Number.isFinite(v))continue;
+      const x=45+(i-start)*dx,y=py(v),dir=Number(st.trend?.[i]||0);
+      if(prevX!==null&&prevDir===dir){ctx.strokeStyle=dir>0?'#19d39b':'#ff5b7c';ctx.beginPath();ctx.moveTo(prevX,prevY);ctx.lineTo(x,y);ctx.stroke();}
+      ctx.fillStyle=dir>0?'#19d39b':'#ff5b7c';ctx.beginPath();ctx.arc(x,y,1.8,0,Math.PI*2);ctx.fill();
+      prevX=x;prevY=y;prevDir=dir;
+    }
+    ctx.font='bold 10px system-ui';ctx.textAlign='center';
+    (st.flips||[]).forEach(f=>{
+      const i=Number(f.i);if(!Number.isInteger(i)||i<start||i>=start+a.length)return;
+      const c=S.c[i];if(!c)return;const x=45+(i-start)*dx;
+      const y=f.side==='BUY'?Math.max(14,py(c.l)-18):Math.min(h-42,py(c.h)+18);
+      ctx.fillStyle=f.side==='BUY'?'#19d39b':'#ff5b7c';ctx.fillText(f.side==='BUY'?'B':'S',x,y);
+    });
+    ctx.restore();ctx.textAlign='start';
   }
-  // Swing High / Swing Low markers (H/L)
-  const visibleHighs=(S.swings?.hi||[]).filter(i=>i>=start&&i<start+a.length);
-  const visibleLows=(S.swings?.lo||[]).filter(i=>i>=start&&i<start+a.length);
+
+  // H/L markers remain visible.
   ctx.textAlign='center';ctx.font='bold 10px system-ui';
-  visibleHighs.forEach(i=>{const c=S.c[i],x=45+(i-start)*dx,y=Math.max(12,py(c.h)-10);ctx.fillStyle='#ffb35c';ctx.fillText('H',x,y);});
-  visibleLows.forEach(i=>{const c=S.c[i],x=45+(i-start)*dx,y=Math.min(h-38,py(c.l)+18);ctx.fillStyle='#6ee7c8';ctx.fillText('L',x,y);});
+  (S.swings?.hi||[]).forEach(i=>{
+    if(i<start||i>=start+a.length)return;const c=S.c[i];if(!c)return;
+    const x=45+(i-start)*dx,y=Math.max(12,py(c.h)-10);ctx.fillStyle='#ffb35c';ctx.fillText('H',x,y);
+  });
+  (S.swings?.lo||[]).forEach(i=>{
+    if(i<start||i>=start+a.length)return;const c=S.c[i];if(!c)return;
+    const x=45+(i-start)*dx,y=Math.min(h-38,py(c.l)+18);ctx.fillStyle='#6ee7c8';ctx.fillText('L',x,y);
+  });
   ctx.textAlign='start';
-  const closes=a.map(x=>x.c);
-  if(S.ema){const e=EMA(closes,20);line(a,e.slice(start),py,dx,'#d9b56c');}
-  if(S.bb){const mid=SMA(closes,20),sd=closes.map((_,i)=>{const z=closes.slice(Math.max(0,i-19),i+1),m=mid[i];return Math.sqrt(z.reduce((q,v)=>q+(v-m)**2,0)/z.length)});line(a,mid.slice(start).map((v,i)=>v+2*sd[start+i]),py,dx,'#60758e');line(a,mid.slice(start).map((v,i)=>v-2*sd[start+i]),py,dx,'#60758e');}
-  if(S.vwap){const v=VWAP(a);line(a,v.slice(start),py,dx,'#7ea6ff');}
-  (S.sr||[]).filter(Number.isFinite).forEach(p=>hline(p,py,w,'#8b6f39'));
-  // Open-position entry line: show the real Binance entry price directly on the chart.
-  const ep=S.accountPosition;
-  const entry=Number(ep?.entryPrice||0);
-  if(ep && Math.abs(Number(ep.positionAmt||0))>0 && entry>0 && entry>=lo && entry<=hi){
-    const ey=py(entry);
-    const isLong=Number(ep.positionAmt)>0;
-    ctx.save();
-    ctx.strokeStyle=isLong?'#19d39b':'#ff5b7c';
-    ctx.lineWidth=1.4;
-    ctx.setLineDash([7,4]);
+
+  // Real Binance entry price.
+  const ep=S.accountPosition,entry=Number(ep?.entryPrice||0);
+  if(ep&&Math.abs(Number(ep.positionAmt||0))>0&&entry>0&&entry>=lo&&entry<=hi){
+    const ey=py(entry),isLong=Number(ep.positionAmt)>0;
+    ctx.save();ctx.strokeStyle=isLong?'#19d39b':'#ff5b7c';ctx.lineWidth=1.4;ctx.setLineDash([7,4]);
     ctx.beginPath();ctx.moveTo(45,ey);ctx.lineTo(w-8,ey);ctx.stroke();ctx.setLineDash([]);
-    const label=(isLong?'ENTRY LONG':'ENTRY SHORT')+' · '+fmtIDR(entry);
-    ctx.font='bold 10px system-ui';
-    const tw=ctx.measureText(label).width+12;
-    const bx=Math.max(48,Math.min(w-tw-8,w-10-tw));
-    const by=Math.max(18,Math.min(h-30,ey-15));
-    ctx.fillStyle=isLong?'#12372d':'#3b1825';
-    ctx.fillRect(bx,by,tw,18);
-    ctx.fillStyle=isLong?'#7ff2cc':'#ff9ab0';
-    ctx.fillText(label,bx+6,by+12);
-    ctx.restore();
+    const label=(isLong?'ENTRY LONG':'ENTRY SHORT')+' · '+fmtIDR(entry);ctx.font='bold 10px system-ui';
+    const tw=ctx.measureText(label).width+12,bx=Math.max(48,Math.min(w-tw-8,w-10-tw)),by=Math.max(18,Math.min(h-30,ey-15));
+    ctx.fillStyle=isLong?'#12372d':'#3b1825';ctx.fillRect(bx,by,tw,18);ctx.fillStyle=isLong?'#7ff2cc':'#ff9ab0';ctx.fillText(label,bx+6,by+12);ctx.restore();
   }
-  
-  if(S.fib&&Number.isFinite(S.fib.a)&&Number.isFinite(S.fib.b)){[0,.236,.382,.5,.618,.786,1].forEach(f=>hline(S.fib.a+(S.fib.b-S.fib.a)*f,py,w,'#3f536a'));}
-  const last=a.at(-1); if(last){const x=45+(a.length-1)*dx;ctx.fillStyle='#e7edf5';ctx.font='10px system-ui';ctx.fillText('LIVE',Math.min(w-34,x+5),Math.max(12,py(last.c)-8));}
-  ctx.fillStyle='#566579';ctx.font='9px system-ui';ctx.fillText('BINANCE FUTURES · LIVE',w-145,14);
+
+  const last=a.at(-1);if(last){const x=45+(a.length-1)*dx;ctx.fillStyle='#e7edf5';ctx.font='10px system-ui';ctx.fillText('LIVE',Math.min(w-34,x+5),Math.max(12,py(last.c)-8));}
+  ctx.fillStyle='#566579';ctx.font='9px system-ui';ctx.fillText('BINANCE FUTURES · LIVE',Math.max(8,w-145),14);
 }
-function priceMap(){let w=Math.max(1,cv.clientWidth),h=Math.max(1,cv.clientHeight);const end=Math.max(1,S.c.length-(S.view?.offset||0)),span=Math.max(40,Math.min(300,S.view?.span||140)),start=Math.max(0,end-span),a=S.c.slice(start,end);if(!a.length)return{w,h,a,hi:1,lo:0,dx:1,py:p=>h/2,start,end};const levels=S.sr.filter(Number.isFinite),hi0=Math.max(...a.map(x=>x.h),...(levels.length?levels:[-Infinity])),lo0=Math.min(...a.map(x=>x.l),...(levels.length?levels:[Infinity]));let hi=Number.isFinite(hi0)?hi0:a[0].h,lo=Number.isFinite(lo0)?lo0:a[0].l;if(S.fib&&Number.isFinite(S.fib.a)&&Number.isFinite(S.fib.b)){hi=Math.max(hi,S.fib.a,S.fib.b);lo=Math.min(lo,S.fib.a,S.fib.b)}if(!(hi>lo)){const mid=Number(a.at(-1)?.c)||0;hi=mid+1;lo=mid-1}return{w,h,a,hi,lo,dx:Math.max(1,(w-58)/Math.max(1,a.length)),py:p=>h-32-(p-lo)/(hi-lo)*(h-62),start,end}}
+function priceMap(){let w=Math.max(1,cv.clientWidth),h=Math.max(1,cv.clientHeight);const end=Math.max(1,S.c.length-(S.view?.offset||0)),span=Math.max(40,Math.min(300,S.view?.span||140)),start=Math.max(0,end-span),a=S.c.slice(start,end);if(!a.length)return{w,h,a,hi:1,lo:0,dx:1,py:p=>h/2,start,end};const levels=(Array.isArray(S.sr)?S.sr:[]).filter(Number.isFinite),hi0=Math.max(...a.map(x=>x.h),...(levels.length?levels:[-Infinity])),lo0=Math.min(...a.map(x=>x.l),...(levels.length?levels:[Infinity]));let hi=Number.isFinite(hi0)?hi0:a[0].h,lo=Number.isFinite(lo0)?lo0:a[0].l;if(S.fib&&Number.isFinite(S.fib.a)&&Number.isFinite(S.fib.b)){hi=Math.max(hi,S.fib.a,S.fib.b);lo=Math.min(lo,S.fib.a,S.fib.b)}if(!(hi>lo)){const mid=Number(a.at(-1)?.c)||0;hi=mid+1;lo=mid-1}return{w,h,a,hi,lo,dx:Math.max(1,(w-58)/Math.max(1,a.length)),py:p=>h-32-(p-lo)/(hi-lo)*(h-62),start,end}}
 function line(a,v,py,dx,col){ctx.strokeStyle=col||'#d9b56c';ctx.beginPath();v.forEach((z,i)=>{let x=45+i*dx,y=py(z);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke()}
 function hline(p,py,w,col){ctx.strokeStyle=col;ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(45,py(p));ctx.lineTo(w,py(p));ctx.stroke();ctx.setLineDash([])}
 function dot(i,p,dx,py,col,t){let x=45+i*dx,y=py(p);ctx.fillStyle=col;ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fill();ctx.fillText(t,x+4,y-4)}
-async function load(){chartStatus('Mengambil data candlestick…');try{stopPolling();closeMarketWS();closePublicWS();try{const rt=await jsonFetch('/api/runtime');MARKET_WS_BASE=rt.marketWs||MARKET_WS_BASE;PUBLIC_WS_BASE=rt.publicWs||PUBLIC_WS_BASE;USER_WS_BASE=rt.userWs||rt.binanceWs||USER_WS_BASE;USDT_IDR_RATE=Number(rt.usdtIdrRate||USDT_IDR_RATE);updateModeUI(rt);await loadOrderConstraints()}catch{}let r=await fetch(`/api/klines?symbol=${S.symbol}&interval=${S.tf}&limit=500`,{cache:'no-store'}),source=r.headers.get('X-Market-Data-Source')||'binance';let d=await r.json();if(!r.ok||d.error)throw Error(d.error||`Market data HTTP ${r.status}`);S.c=d.map(x=>({t:+x[0],o:+x[1],h:+x[2],l:+x[3],c:+x[4],v:+x[5]}));$('price').textContent=fmtIDR(S.c.at(-1)?.c);$('conn').textContent=source==='bybit-fallback'?'MARKET DATA FALLBACK':'CONNECTING REALTIME…';$('conn').title=source==='bybit-fallback'?'Binance REST unavailable; chart history is using Bybit fallback.':'Connecting directly to Binance Futures WebSocket';S.swings=swings(S.c);smart();safeDraw();calc();connect();connectPublic();connectAccountWS();if($('signalTf'))$('signalTf').value=S.tf;mtf();refreshSignalFromCurrent();updateAITrend();updateLiveSignal();}catch(e){$('conn').textContent='MARKET DATA ERROR';$('conn').title=e.message;chartStatus('Data chart gagal dimuat: '+e.message+' — periksa /api/klines dan konfigurasi Vercel.');startPolling()}}
+async function load(){chartStatus('Mengambil data candlestick…');try{stopPolling();closeMarketWS();closePublicWS();try{const rt=await jsonFetch('/api/runtime');MARKET_WS_BASE=rt.marketWs||MARKET_WS_BASE;PUBLIC_WS_BASE=rt.publicWs||PUBLIC_WS_BASE;USER_WS_BASE=rt.userWs||rt.binanceWs||USER_WS_BASE;USER_WS_MODE=rt.userWsMode||USER_WS_MODE;USDT_IDR_RATE=Number(rt.usdtIdrRate||USDT_IDR_RATE);updateModeUI(rt);await loadOrderConstraints()}catch{}let r=await fetch(`/api/klines?symbol=${S.symbol}&interval=${S.tf}&limit=500`,{cache:'no-store'}),source=r.headers.get('X-Market-Data-Source')||'binance';let d=await r.json();if(!r.ok||d.error)throw Error(d.error||`Market data HTTP ${r.status}`);S.c=d.map(x=>({t:+x[0],o:+x[1],h:+x[2],l:+x[3],c:+x[4],v:+x[5]}));$('price').textContent=fmtIDR(S.c.at(-1)?.c);$('conn').textContent=source==='bybit-fallback'?'MARKET DATA FALLBACK':'CONNECTING REALTIME…';$('conn').title=source==='bybit-fallback'?'Binance REST unavailable; chart history is using Bybit fallback.':'Connecting directly to Binance Futures WebSocket';S.swings=swings(S.c);smart();safeDraw();calc();connect();connectPublic();connectAccountWS();if($('signalTf'))$('signalTf').value=S.tf;mtf();refreshSignalFromCurrent();updateAITrend();updateLiveSignal();}catch(e){$('conn').textContent='MARKET DATA ERROR';$('conn').title=e.message;chartStatus('Data chart gagal dimuat: '+e.message+' — periksa /api/klines dan konfigurasi Vercel.');startPolling()}}
 function stopPolling(){if(pollTimer){clearInterval(pollTimer);pollTimer=null}}
 async function pollKlines(){if(marketWsConnected)return;try{const r=await fetch(`/api/klines?symbol=${S.symbol}&interval=${S.tf}&limit=500`,{cache:'no-store'});const d=await r.json();if(marketWsConnected)return;if(!r.ok||d.error)throw Error(d.error||`Market data HTTP ${r.status}`);const rows=d.map(x=>({t:+x[0],o:+x[1],h:+x[2],l:+x[3],c:+x[4],v:+x[5]}));if(!rows.length)return;S.c=rows;const source=r.headers.get('X-Market-Data-Source')||'binance';$('price').textContent=fmtIDR(S.c.at(-1).c);$('conn').textContent=source==='bybit-fallback'?'REST FALLBACK · BYBIT':'REST FALLBACK · BINANCE';S.swings=swings(S.c);smart();calc();safeDraw()}catch(e){$('conn').title=e.message}}
 async function pollLive(){if(marketWsConnected)return;try{const r=await fetch(`/api/market/ticker?symbol=${S.symbol}&interval=${S.tf}`,{cache:'no-store'});const d=await r.json();if(marketWsConnected)return;if(!r.ok||d.error)throw Error(d.error||`Market ticker HTTP ${r.status}`);if(d.candle){const c={t:+d.candle.t,o:+d.candle.o,h:+d.candle.h,l:+d.candle.l,c:+d.candle.c,v:+d.candle.v},q=S.c.at(-1);if(q?.t===c.t)S.c[S.c.length-1]=c;else if(!q||c.t>q.t)S.c.push(c);if(S.c.length>500)S.c.shift();$('price').textContent=fmtIDR(c.c);$('mark').textContent=fmtIDR(d.markPrice);$('index').textContent=fmtIDR(d.indexPrice);$('funding').textContent=(+d.fundingRate*100).toFixed(4)+'%';S.market.mark=+d.markPrice;S.market.index=+d.indexPrice;S.market.funding=+d.fundingRate;updateLiveSignal();S.swings=swings(S.c);smart();calc();safeDraw()}}catch(e){$('conn').title='REST fallback: '+e.message}}
@@ -162,8 +190,9 @@ function applyDepthUpdate(d){if(!S.book.ready)return;if(Number(d.u)<=Number(S.bo
 function scheduleDepthResync(){if(depthResyncTimer)return;depthResyncTimer=setTimeout(()=>{depthResyncTimer=null;syncDepthSnapshot()},250)}
 async function syncDepthSnapshot(){if(depthSyncBusy)return;depthSyncBusy=true;try{const r=await jsonFetch(`/api/depth?symbol=${S.symbol}`);if(r?.lastUpdateId==null)throw Error('Depth snapshot tidak memiliki lastUpdateId');S.book.bids=r.bids||[];S.book.asks=r.asks||[];S.book.lastUpdateId=Number(r.lastUpdateId);S.book.ready=false;const buffered=S.book.buffer.splice(0);let start=-1;for(let i=0;i<buffered.length;i++){const d=buffered[i];if(Number(d.u)<=S.book.lastUpdateId)continue;if(Number(d.U)<=S.book.lastUpdateId+1&&Number(d.u)>=S.book.lastUpdateId+1){start=i;break}if(Number(d.U)>S.book.lastUpdateId+1)break}if(start>=0){S.book.ready=true;for(let i=start;i<buffered.length;i++)applyDepthUpdate(buffered[i])}else if(buffered.length){const d=buffered[buffered.length-1];if(Number(d.u)>S.book.lastUpdateId)S.book.ready=true;for(const x of buffered)if(S.book.ready)applyDepthUpdate(x)}else S.book.ready=true;renderBook()}catch{S.book.ready=false;scheduleDepthResync()}finally{depthSyncBusy=false}}
 
-function closeAccountWS(){accountWsConnecting=false;if(accountWsKeepalive){clearInterval(accountWsKeepalive);accountWsKeepalive=null;}try{wsAccount?.close()}catch{}wsAccount=null;accountWsConnected=false;}
-function scheduleAccountReconnect(){const delay=Math.min(30000,1500*Math.pow(1.7,accountWsRetry++));setTimeout(()=>connectAccountWS(),delay);}
+function closeAccountWS(){accountWsConnecting=false;if(accountWsRetryTimer){clearTimeout(accountWsRetryTimer);accountWsRetryTimer=null}if(accountWsKeepalive){clearInterval(accountWsKeepalive);accountWsKeepalive=null;}try{wsAccount?.close()}catch{}wsAccount=null;accountWsConnected=false;}
+let accountWsRetryTimer=null;
+function scheduleAccountReconnect(){if(accountWsRetryTimer)return;const delay=Math.min(15000,1000*Math.pow(1.6,accountWsRetry++));accountWsRetryTimer=setTimeout(()=>{accountWsRetryTimer=null;connectAccountWS()},delay);}
 async function connectAccountWS(){
   if(accountWsConnecting||accountWsConnected)return;
   accountWsConnecting=true;
@@ -171,13 +200,15 @@ async function connectAccountWS(){
     const x=await jsonFetch('/api/user-stream',{headers:H()});
     if(!x?.listenKey)throw Error(x?.error||'ListenKey tidak tersedia');
     const base=String(x.userWs||USER_WS_BASE).replace(/\/$/,'');
-    const socket=new WebSocket(`${base}/ws/${x.listenKey}`); wsAccount=socket;
+    const mode=x.userWsMode||USER_WS_MODE;
+    const url=mode==='private-routed'?`${base}/ws/${encodeURIComponent(x.listenKey)}`:`${base}/ws/${encodeURIComponent(x.listenKey)}`;
+    const socket=new WebSocket(url); wsAccount=socket;
     socket.onopen=()=>{if(wsAccount!==socket)return;accountWsConnecting=false;accountWsConnected=true;accountWsRetry=0;lastAccountWsDataAt=Date.now();
       if(accountWsKeepalive)clearInterval(accountWsKeepalive);
       accountWsKeepalive=setInterval(()=>jsonFetch('/api/user-stream',{method:'PUT',headers:H()}).catch(()=>{}),30*60*1000);
       setAccountRealtimeStatus('ACCOUNT WS · REALTIME','good');
     };
-    socket.onerror=()=>{if(wsAccount!==socket)return;accountWsConnected=false;setAccountRealtimeStatus('ACCOUNT WS · RECONNECTING…','wait');};
+    socket.onerror=()=>{if(wsAccount!==socket)return;accountWsConnected=false;setAccountRealtimeStatus('ACCOUNT WS · RECONNECTING…','wait');scheduleAccountReconnect();};
     socket.onclose=()=>{if(wsAccount!==socket)return;accountWsConnected=false;accountWsConnecting=false;if(accountWsKeepalive){clearInterval(accountWsKeepalive);accountWsKeepalive=null;}setAccountRealtimeStatus('ACCOUNT WS · RECONNECTING…','wait');scheduleAccountReconnect();};
     socket.onmessage=e=>{if(wsAccount!==socket)return;try{const d=JSON.parse(e.data);lastAccountWsDataAt=Date.now();handleAccountStreamEvent(d);}catch{}};
   }catch(e){accountWsConnecting=false;setAccountRealtimeStatus('ACCOUNT WS · FALLBACK REST','wait');scheduleAccountReconnect();}
@@ -810,12 +841,12 @@ async function closePosition(opts={}){
   const mode=String(rt.tradingMode||'paper').toLowerCase();
   const x=await jsonFetch(mode==='paper'?'/api/paper/close':'/api/live/close',{method:'POST',headers:H(),body:JSON.stringify({symbol:S.symbol})}).catch(e=>({error:e.message}));
   if(x.error){$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="bad">GAGAL MENUTUP</b><div class="note">${x.error}</div>`;if(opts.auto)throw Error(x.error);return alert(x.error)}
-  const realized=Number(x.realizedPnl??x.pnl??0),delta=Number(x.walletDelta||0),after=Number(x.balanceAfter||0);$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="${realized>=0?'good':'bad'}">POSISI DITUTUP · ${realized>=0?'PROFIT':'LOSS'} REALIZED ${fmtIDR(realized)}</b><div class="note">Harga keluar ${x.exitPrice?fmtIDR(Number(x.exitPrice||0)):'market'} · Saldo Binance setelah close: <b>${Number.isFinite(after)?fmtIDR(after):'—'}</b> · Perubahan wallet: ${fmtIDR(delta)}</div>`;
+  const realized=Number(x.realizedPnl??x.pnl??0),fee=Number(x.commissionUSDT||0),net=Number(x.netRealizedAfterFee??(realized-fee)),delta=Number(x.walletDelta||0),after=Number(x.balanceAfter||0);$('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="${net>=0?'good':'bad'}">POSISI DITUTUP · ${net>=0?'PROFIT':'LOSS'} BERSIH ${fmtIDR(net)}</b><div class="note">PnL terealisasi: <b>${fmtIDR(realized)}</b> · Fee close: <b>${fmtIDR(fee)}</b> · Harga eksekusi: <b>${x.exitPrice?fmtIDR(Number(x.exitPrice||0)):'—'}</b></div><div class="note">Saldo Binance setelah close: <b>${Number.isFinite(after)?fmtIDR(after):'—'}</b> · Perubahan wallet: <b>${fmtIDR(delta)}</b></div>`;
   S.accountPosition=null;scheduleDraw();
   for(let i=0;i<8;i++){
     await refreshAccount();
     if(!S.accountPosition){
-      $('orderResult').innerHTML=`<b class="${realized>=0?'good':'bad'}">CLOSED · ${realized>=0?'PROFIT':'LOSS'} REALIZED ${fmtIDR(realized)}</b><div class="note">LIVE POSITION: <b>CLOSED / 0 BTC</b> · Saldo Binance: <b>${Number.isFinite(after)?fmtIDR(after):'—'}</b> · Perubahan wallet: ${fmtIDR(delta)}</div>`;
+      $('orderResult').innerHTML=`<b class="${net>=0?'good':'bad'}">CLOSED · ${net>=0?'PROFIT':'LOSS'} BERSIH ${fmtIDR(net)}</b><div class="note">PnL terealisasi ${fmtIDR(realized)} · Fee ${fmtIDR(fee)} · Harga eksekusi ${x.exitPrice?fmtIDR(Number(x.exitPrice||0)):'—'}</div><div class="note">LIVE POSITION: <b>CLOSED / 0 BTC</b> · Saldo Binance: <b>${Number.isFinite(after)?fmtIDR(after):'—'}</b> · Perubahan wallet: ${fmtIDR(delta)}</div>`;
       return;
     }
     await new Promise(resolve=>setTimeout(resolve,300));

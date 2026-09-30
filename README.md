@@ -90,3 +90,10 @@ Replace the previous package with this ZIP. Keep the existing Binance credential
 - Setelah posisi ditutup karena loss/profit-lock, kunci signal lama dibersihkan sehingga re-entry searah bisa dilakukan setelah cooldown dan konfirmasi baru.
 - Service worker/app cache dinaikkan ke v5.38.4 agar browser tidak menjalankan JavaScript lama.
 - Tidak ada sistem yang dapat menjamin profit; perubahan ini menyatukan data dan eksekusi, bukan menjamin arah pasar.
+
+
+## v5.40.2 Execution Sync
+- Binance USDⓈ-M account WebSocket uses the routed private endpoint in live mode; demo keeps the demo Futures stream. Binance retired legacy production WS routing in April 2026.
+- Close reconciliation uses the actual close order trades (`userTrades`) for executed price, realized PnL and USDT commission, then confirms position = 0 via positionRisk.
+- UI distinguishes unrealized PnL, realized PnL, close fee, and net realized result.
+- REST is reconciliation/fallback; it is not treated as the primary realtime account feed.
