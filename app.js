@@ -25,6 +25,7 @@ let AUTO_PROTECT_COOLDOWN_MS=15000;
 let AUTO_PROTECT={key:null,side:null,peak:0,armed:false,lastActionAt:0};
 let AUTO_LAST_ATTEMPT={key:null,at:0};
 let AUTO_RETRY_MS=5000;
+let MANUAL_ENTRY_IN_FLIGHT=false;
 let autoProtectBusy=false;
 let lastSignalSlot=null,lastSignalSide=null;
 try{SIGNALS=JSON.parse(localStorage.getItem(SIGNAL_KEY)||'[]')}catch{SIGNALS=[]}
@@ -102,6 +103,27 @@ function draw(){
   ctx.textAlign='center';ctx.font='bold 10px system-ui';
   visibleHighs.forEach(i=>{const c=S.c[i],x=45+(i-start)*dx,y=Math.max(12,py(c.h)-10);ctx.fillStyle='#ffb35c';ctx.fillText('H',x,y);});
   visibleLows.forEach(i=>{const c=S.c[i],x=45+(i-start)*dx,y=Math.min(h-38,py(c.l)+18);ctx.fillStyle='#6ee7c8';ctx.fillText('L',x,y);});
+  // BUY/SELL signal markers: keep the B/S indicators on the chart.
+  // A signal is frozen at the close of its anchor candle, so the marker is
+  // drawn on that anchor candle rather than moving with the live candle.
+  const sigTf=$('signalTf')?.value||S.tf, sigMs=tfMillis(sigTf);
+  const sigs=(SIGNALS||[]).filter(x=>x.symbol===S.symbol&&x.tf===sigTf&&(x.side==='BUY'||x.side==='SELL'));
+  ctx.font='bold 10px system-ui';ctx.textAlign='center';
+  sigs.forEach(x=>{
+    const anchorTs=Number(x.anchorTs||Number(x.targetTs)-sigMs);
+    const i=S.c.findIndex(c=>Number(c.t)===anchorTs);
+    if(i<start||i>=end||i<0)return;
+    const c=S.c[i],cx=45+(i-start)*dx,isBuy=x.side==='BUY';
+    const y=isBuy?Math.max(14,py(c.l)+30):Math.min(h-16,py(c.h)-30);
+    ctx.save();
+    ctx.fillStyle=isBuy?'#19d39b':'#ff5b7c';
+    ctx.beginPath();
+    if(isBuy){ctx.moveTo(cx,y-6);ctx.lineTo(cx-6,y+5);ctx.lineTo(cx+6,y+5);}else{ctx.moveTo(cx,y+6);ctx.lineTo(cx-6,y-5);ctx.lineTo(cx+6,y-5);}
+    ctx.closePath();ctx.fill();
+    ctx.fillStyle=isBuy?'#7ff2cc':'#ff9ab0';
+    ctx.fillText(isBuy?'B':'S',cx,isBuy?y+17:y-10);
+    ctx.restore();
+  });
   ctx.textAlign='start';
   const closes=a.map(x=>x.c);
   if(S.ema){const e=EMA(closes,20);line(a,e.slice(start),py,dx,'#d9b56c');}
@@ -839,6 +861,9 @@ function normalizePositionSide(side){const v=String(side||'').toUpperCase();if(v
 async function order(side,opts={}){
   side=normalizePositionSide(side);
   const isAuto=!!opts.auto;
+  if(!isAuto && MANUAL_ENTRY_IN_FLIGHT){setAutoStatus('ENTRY MANUAL: order sebelumnya masih diproses Binance…','wait');return;}
+  if(!isAuto)MANUAL_ENTRY_IN_FLIGHT=true;
+  try {
   if(isAuto&&!AUTO_ENTRY)return;
   if(!isAuto&&!window.__manualOrderClick&&AUTO_ENTRY===true)return;
   if(S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0)return alert(`Masih ada posisi Binance ${Number(S.accountPosition.positionAmt)>0?'LONG':'SHORT'} ${Math.abs(Number(S.accountPosition.positionAmt)).toFixed(6)} BTC. Tutup posisi aktif dulu.`);
@@ -900,8 +925,9 @@ Lanjut entry?`;
     if(isAuto)throw Error(msg);
     return alert(msg);
   }
-  $('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="${match?'good':'bad'}">ENTRY ${side==='LONG'?'BUY / LONG':'SELL / SHORT'} ${match?'TERSINKRON':'PERIKSA QTY'}</b><div class="note">Target server <b>${Number(sz.finalQty||preview.finalQty).toFixed(6)} BTC</b> · Notional target <b>${fmtIDR(Number(sz.finalNotional||preview.finalNotional))}</b> · Binance aktual <b>${ap?Number(ap.quantity).toFixed(6):'—'} BTC</b> / ${ap?fmtIDR(Number(ap.notional||0)):'—'} · Entry ${fmtIDR(Number(ap?.entryPrice||preview.entryPrice))} · SL ${fmtIDR(slIDR)} · Target ${noTp?'TANPA BATAS':fmtIDR(tpIDR)}</div><div class="note good">Rp300.000 × 20× hanya menjadi ±Rp6.000.000 jika Qty aktual Binance memang sesuai target. UI memakai Qty Binance sebagai sumber kebenaran.</div>`;
+  $('orderResult').style.display='block';$('orderResult').innerHTML=`<b class="${match?'good':'bad'}">ENTRY ${side==='LONG'?'BUY / LONG':'SELL / SHORT'} ${match?'TERSINKRON':'PERIKSA QTY'}</b><div class="note">Target server <b>${Number(sz.finalQty||preview.finalQty).toFixed(6)} BTC</b> · Notional target <b>${fmtIDR(Number(sz.finalNotional||preview.finalNotional))}</b> · Binance aktual <b>${ap?Number(ap.quantity).toFixed(6):'—'} BTC</b> / ${ap?fmtIDR(Number(ap.notional||0)):'—'} · Entry ${fmtIDR(Number(ap?.entryPrice||preview.entryPrice))} · SL ${noTp?'TIDAK DIPASANG':fmtIDR(slIDR)} · Target ${noTp?'TANPA BATAS':fmtIDR(tpIDR)}</div><div class="note good">Posisi Binance adalah sumber kebenaran. Jika proteksi exchange ditolak, manual BUY/SELL tetap masuk dan dashboard menjaga pemantauan realtime.</div>`;
   if(mode==='paper'&&x.position){S.positions.push(x.position);render('positions')}else{await refreshAccount()}
+  } finally { if(!isAuto)MANUAL_ENTRY_IN_FLIGHT=false; }
 }
 
 function fmtIDRNumber(usdt){return Number(usdt||0)*USDT_IDR_RATE}
