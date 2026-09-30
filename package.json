@@ -1,6 +1,6 @@
 {
   "name": "obsidian-futures-v5-vercel",
-  "version": "5.41.0",
+  "version": "5.41.3",
   "private": true,
   "type": "module",
   "engines": {

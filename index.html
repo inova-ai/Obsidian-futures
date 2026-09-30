@@ -1,5 +1,5 @@
 <!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>OBSIDIAN | Futures Intelligence v5.41.1</title><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#05070b"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Obsidian Futures">
+<title>OBSIDIAN | Futures Intelligence v5.41.3</title><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#05070b"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Obsidian Futures">
 <style>
 :root{--bg:#05070b;--p:#0b1017;--p2:#101722;--line:#1d2938;--txt:#edf2f7;--muted:#8491a4;--gold:#d9b56c;--g:#19d59b;--r:#ff5b7c;--b:#71a7ff;--c:#b78cff}
 *{box-sizing:border-box}body{margin:0;background:#05070b;color:var(--txt);font:12px Inter,system-ui,-apple-system,sans-serif}.top{height:58px;display:flex;align-items:center;gap:12px;padding:0 14px;border-bottom:1px solid var(--line);background:#080c12;position:sticky;top:0;z-index:5}.brand{font-weight:900;letter-spacing:.13em}.brand i{color:var(--gold);font-style:normal}.pair{font-size:16px;font-weight:800}.price{font-weight:800;color:var(--g);font-variant-numeric:tabular-nums}.grow{flex:1}.badge,.btn,select,input{border:1px solid var(--line);background:#0d141d;color:var(--txt);border-radius:7px;padding:7px}.badge{border-radius:16px;color:var(--muted)}button{cursor:pointer}.btn:hover{border-color:#526684}.btn.active{border-color:var(--gold);color:var(--gold)}.danger{color:var(--r);border-color:#6a2b3e}.grid{display:grid;grid-template-columns:minmax(0,1fr) 355px;min-height:calc(100vh - 58px)}main{padding:10px;min-width:0}.panel{background:linear-gradient(180deg,#0b1118,#080c12);border:1px solid var(--line);border-radius:12px;overflow:hidden}.toolbar{display:flex;gap:5px;align-items:center;padding:8px;border-bottom:1px solid var(--line);flex-wrap:wrap}.chartbox{height:560px;position:relative}.chart{width:100%;height:100%;touch-action:none}.side{padding:10px;border-left:1px solid var(--line);background:#070a0f;overflow:auto}.sec{background:#0a0f16;border:1px solid var(--line);border-radius:10px;padding:11px;margin-bottom:9px}.sec h3{text-transform:uppercase;letter-spacing:.1em;font-size:10px;color:#9ca8ba;margin:0 0 9px}.g2{display:grid;grid-template-columns:1fr 1fr;gap:7px}.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px}.field{display:grid;gap:4px;color:var(--muted)}.row{display:flex;justify-content:space-between;gap:8px;margin:7px 0}.good{color:var(--g)}.bad{color:var(--r)}.gold{color:var(--gold)}.blue{color:var(--b)}.full{width:100%}.note{color:var(--muted);font-size:10px;line-height:1.45}.meter{height:4px;background:#17202c;border-radius:8px;overflow:hidden}.meter>i{display:block;height:100%;background:var(--gold);width:0}.bottom{margin-top:10px}.tabs{display:flex;gap:3px;padding:8px;border-bottom:1px solid var(--line);overflow:auto}.tab{padding:7px 9px;color:var(--muted);cursor:pointer;white-space:nowrap}.tab.active{color:#fff;border-bottom:2px solid var(--gold)}.content{padding:10px}.table{width:100%;border-collapse:collapse}.table td,.table th{padding:7px;border-bottom:1px solid #17202b;text-align:left}.scroll{max-height:220px;overflow:auto}.ob{display:grid;grid-template-columns:1fr 1fr;gap:8px}.obside{font-variant-numeric:tabular-nums}.obrow{display:flex;justify-content:space-between;padding:3px 5px}.obrow span:last-child{color:var(--muted)}.statgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px}.stat{padding:7px;background:#0d141d;border-radius:7px}.stat small{display:block;color:var(--muted);font-size:9px}.stat b{font-size:12px}.calcCard{margin-top:8px;padding:10px;border:1px solid #2a3546;border-radius:9px;background:linear-gradient(180deg,#0d141d,#090e15)}.calcTitle{font-size:10px;font-weight:900;letter-spacing:.12em;color:var(--gold);margin-bottom:7px}.pill{display:inline-block;padding:2px 5px;border:1px solid var(--line);border-radius:10px;margin:1px}.switch{display:flex;align-items:center;gap:7px}.switch input{accent-color:var(--gold)}.dangerbox{border-color:#6a2b3e;background:#160b10}@media(max-width:980px){.grid{grid-template-columns:1fr}.side{border-left:0;border-top:1px solid var(--line)}.chartbox{height:470px}}@media(max-width:600px){.top{overflow:auto}.brand{min-width:max-content}.chartbox{height:390px}.g3{grid-template-columns:1fr 1fr}.side{padding:8px}}
@@ -48,7 +48,7 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;background:lin
 .resultRow b{font-size:10px}.resultRow .hit{color:#27e78f;font-weight:900}.resultRow .miss{color:#ff5574;font-weight:900}.resultRow .neutral{color:#d9b56c;font-weight:900}
 @media(max-width:600px){.nextSignalCard{padding:10px}.nextSide{font-size:20px}.resultRow{grid-template-columns:1fr 48px 62px;font-size:9px}}
 
-/* v5.41.1 — Obsidian Futures Desktop/App Dashboard skin
+/* v5.41.2 — Obsidian Futures Desktop/App Dashboard skin
    Visual redesign inspired by the supplied reference: near-black navy canvas,
    emerald BUY, coral SELL, gold active controls, glass panels and app rail.
    Trading logic/IDs are intentionally untouched. */
@@ -74,7 +74,7 @@ input:focus,select:focus,.btn:focus{outline:none;border-color:#2c638a;box-shadow
 @media(max-width:980px){.appRail{display:none}.top{padding-left:14px}.top:after{left:0}.grid{margin-left:0;grid-template-columns:1fr}.grid main{padding:9px}.side{border-left:0;border-top:1px solid #10253a;padding:9px}.chartbox{height:470px}}
 @media(max-width:600px){.top{height:58px;padding:0 8px;gap:6px}.brand{font-size:9px}.brand:before{font-size:12px}.pair{min-width:auto;font-size:12px;padding:7px 9px}.price{font-size:12px}.top .badge{padding:5px 7px;font-size:8px}.top #accountMode{display:none}.top #kill{padding:6px 8px}.grid{min-height:calc(100vh - 58px)}.chartbox{height:390px}.toolbar{gap:4px}.toolbar .btn,.toolbar select{padding:6px;font-size:10px}.liveStrip{grid-template-columns:1fr 1fr!important}.livePositionHero{margin-top:8px}.side{padding:8px}.signalDropV4 .signalDropTitle{font-size:11px!important}}
 
-/* v5.41.1 — final premium dashboard cleanup: chart stays unobstructed. */
+/* v5.41.2 — final premium dashboard cleanup: chart stays unobstructed. */
 body{overflow-x:hidden}
 .appRail{width:198px}
 .top{padding-left:214px}
@@ -107,7 +107,7 @@ body{overflow-x:hidden}
 
 
 /* =========================================================
-   v5.41.1 — OBSIDIAN FUTURES / FULL PREMIUM DESKTOP UI
+   v5.41.2 — OBSIDIAN FUTURES / FULL PREMIUM DESKTOP UI
    Visual-only redesign: keep existing IDs and trading logic.
    ========================================================= */
 :root{
@@ -162,7 +162,7 @@ body:before{background-image:linear-gradient(rgba(90,160,205,.025) 1px,transpare
 }
 @media(max-width:520px){.top .price{display:none!important}.top .badge#mode{display:none!important}.top{justify-content:space-between!important}.chartbox{height:360px!important}.liveStrip{grid-template-columns:1fr 1fr!important}.liveHeroPnl b{font-size:21px!important}.accountStat b{font-size:11px!important}.g2{grid-template-columns:1fr 1fr}.tabs{overflow-x:auto}.tab{padding:10px 9px!important;font-size:9px!important}}
 
-/* v5.41.1 — reference UI: desktop trading terminal composition */
+/* v5.41.2 — reference UI: desktop trading terminal composition */
 :root{--ref-bg:#030912;--ref-panel:#071522;--ref-panel2:#0a1b2b;--ref-line:#17334d;--ref-muted:#7891a7;--ref-text:#edf6ff;--ref-green:#10d99a;--ref-red:#ff4f6d;--ref-gold:#f4b83f;--ref-blue:#4da6ff}
 body{background:#02070d!important;color:var(--ref-text)!important}
 .top{height:72px!important;background:#030a12!important;border-bottom:1px solid #122a40!important}
@@ -199,6 +199,32 @@ body{background:#02070d!important;color:var(--ref-text)!important}
 #chart .candleLesson,#candleLesson,.candleLesson,.chartLesson,.lessonOverlay{display:none!important}
 @media(max-width:1199px) and (min-width:901px){.grid{margin-left:174px!important;grid-template-columns:minmax(0,1fr) 315px!important}.appRail{width:174px!important}.top{padding-left:188px!important}.chartbox{height:500px!important}}
 @media(max-width:900px){.grid{margin-left:0!important;grid-template-columns:1fr!important}.top{padding-left:9px!important}.side{padding:8px!important}.side>#livePositionHero,.side>#autoTradePanel{margin-bottom:8px!important}.chartbox{height:410px!important}.liveStrip{grid-template-columns:1fr 1fr!important}}
+
+/* v5.41.2 — responsive layout cleanup: keep columns aligned and never squeeze the chart + right rail on tablet/mobile */
+@media(max-width:1199px){
+  .appRail{display:none!important}
+  .top{margin-left:0!important;padding-left:12px!important;width:100%!important}
+  .grid{margin-left:0!important;grid-template-columns:minmax(0,1fr)!important;width:100%!important;gap:0!important}
+  .grid main{width:100%!important;min-width:0!important;padding:10px!important}
+  .side{width:100%!important;min-width:0!important;border-left:0!important;border-top:1px solid #102b40!important;padding:10px!important;overflow:visible!important}
+  .panel,.livePositionHero,.accountDock,.bottom,.signalDrop,.sec{width:100%!important;max-width:none!important}
+  .chartbox{height:500px!important}
+}
+@media(max-width:700px){
+  body{width:100%;min-width:0;overflow-x:hidden}
+  .top{height:58px!important;padding:0 8px!important;gap:6px!important;overflow-x:auto!important;overflow-y:hidden!important;white-space:nowrap!important}
+  .top .brand{min-width:max-content!important}
+  .grid main{padding:7px!important}
+  .side{padding:7px!important}
+  .panel{border-radius:10px!important}
+  .panel>.toolbar{overflow-x:auto!important;flex-wrap:nowrap!important;white-space:nowrap!important}
+  .chartbox{height:390px!important}
+  .liveStrip{grid-template-columns:1fr 1fr!important}
+  .livePositionHero{margin-top:7px!important}
+  .accountGrid{grid-template-columns:1fr 1fr!important}
+  .positionGrid{grid-template-columns:1fr 1fr!important}
+  .g2{grid-template-columns:1fr 1fr!important}
+}
 </style></head><body>
 <nav class="appRail" aria-label="Navigasi Obsidian Futures">
   <div class="railBrand"><div class="railMark">◆</div><div><b>OBSIDIAN</b><span>FUTURES</span></div></div>
@@ -211,16 +237,15 @@ body{background:#02070d!important;color:var(--ref-text)!important}
     <div class="railItem"><span class="railIcon">⚙</span><span>Pengaturan</span></div>
   </div>
   <div class="railPromo"><div class="promoDiamond">◆</div><b>OBSIDIAN</b><span>Trade Smarter</span><span>With AI</span></div>
-  <div class="railFoot"><span>v5.41.1</span><span><i></i> Online</span></div>
+  <div class="railFoot"><span>v5.41.2</span><span><i></i> Online</span></div>
 </nav>
 <div id="authbar" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:20;align-items:center;justify-content:center"><div class="panel" style="width:min(420px,92vw);padding:18px"><h2>Obsidian Access</h2><div id="authmsg" class="note">Buat akun lokal atau login.</div><input id="au" placeholder="Username" style="width:100%;margin:6px 0;padding:10px"><input id="ap" type="password" placeholder="Password min 12 karakter" style="width:100%;margin:6px 0;padding:10px"><input id="ac" placeholder="2FA code (jika aktif)" style="width:100%;margin:6px 0;padding:10px"><div class="row"><button class="btn" id="aset">Setup</button><button class="btn active" id="alog">Login</button></div></div></div><header class="top"><div class="brand">OBSIDIAN <i>INTELLIGENCE v5</i></div><div class="pair" id="pair">BTCUSDT</div><div class="price" id="price">—</div><div class="grow"></div><div class="badge" id="conn">OFFLINE</div><div class="badge" id="mode">DEMO</div><div class="badge" id="accountMode">ACCOUNT —</div><button class="btn" id="installPwa" style="display:none">＋ PASANG APP</button><button class="btn danger" id="kill">KILL</button></header>
-<section id="credentialPanel" style="display:none;margin:12px 0;padding:12px;border:1px solid #293246;border-radius:12px;background:#111722"><h3 style="margin:0 0 8px">Binance API Credentials</h3><div class="g3"><label class="field">API Key<input id="apiKey" autocomplete="off"></label><label class="field">API Secret<input id="apiSecret" type="password" autocomplete="new-password"></label><label class="field">2FA Code<input id="credCode" inputmode="numeric" maxlength="6" placeholder="Jika 2FA aktif"></label></div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button class="btn" id="saveCred">Simpan Credential</button><button class="btn" id="removeCred">Hapus Credential</button><button class="btn" id="testBinance">Test Binance</button></div><div id="credStatus" class="note" style="margin-top:8px">Credential tersimpan di server dalam bentuk terenkripsi. Setelah disimpan, form tetap mempertahankan input agar tidak terlihat hilang. Untuk keamanan, jangan bagikan API Secret.</div></section><div class="grid"><main>
-<div class="panel"><div class="toolbar">
+<section id="credentialPanel" style="display:none;margin:12px 0;padding:12px;border:1px solid #293246;border-radius:12px;background:#111722"><h3 style="margin:0 0 8px">Binance API Credentials</h3><div class="g3"><label class="field">API Key<input id="apiKey" autocomplete="off"></label><label class="field">API Secret<input id="apiSecret" type="password" autocomplete="new-password"></label><label class="field">2FA Code<input id="credCode" inputmode="numeric" maxlength="6" placeholder="Jika 2FA aktif"></label></div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button class="btn" id="saveCred">Simpan Credential</button><button class="btn" id="removeCred">Hapus Credential</button><button class="btn" id="testBinance">Test Binance</button></div><div id="credStatus" class="note" style="margin-top:8px">Credential tersimpan di server dalam bentuk terenkripsi. Setelah disimpan, form tetap mempertahankan input agar tidak terlihat hilang. Untuk keamanan, jangan bagikan API Secret.</div></section><section class="chartStage"><div class="panel"><div class="toolbar">
 <select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>BNBUSDT</option><option>SOLUSDT</option><option>XRPUSDT</option><option>DOGEUSDT</option><option>ADAUSDT</option></select>
 <select id="tf"><option>1m</option><option>3m</option><option selected>5m</option><option>15m</option><option>1h</option><option>4h</option><option>1d</option></select>
 <span id="analysisMode" class="badge" title="1 indikator saja: Supertrend · B/S realtime · order tetap dari LONG/SHORT">ORDER: LONG/SHORT · ANALISIS SAJA</span><button class="btn active" id="supertrendBtn">Supertrend · B/S</button><span class="note">1 indikator · realtime Binance</span><div style="display:none"><button class="btn active" id="emaBtn">EMA</button><button class="btn" id="bbBtn">BB</button><button class="btn" id="macdBtn">MACD</button><button class="btn" id="vwapBtn">VWAP</button><button class="btn" id="adxBtn">ADX</button><button class="btn" id="atrBtn">ATR</button></div>
 <button class="btn" id="trendBtn">↗ Trendline</button><button class="btn" id="fibBtn">Fib</button><button class="btn" id="srBtn">Auto S/R</button><button class="btn" id="swingBtn">Swings</button><span class="grow"></span><button class="btn" id="tv">TV ↗</button>
-<div class="zoomGroup"><button class="btn zoomBtn" id="zoomOut" title="Zoom out">−</button><button class="btn zoomBtn" id="zoomIn" title="Zoom in">+</button><button class="btn zoomBtn" id="zoomReset" title="Reset zoom">↺</button></div><span class="chartHint">Pinch / wheel / tombol ± untuk zoom</span></div><div class="chartbox"><canvas id="chart" class="chart" aria-label="Grafik candlestick Binance Futures"></canvas><div id="chartStatus" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:20px;text-align:center;color:#8491a4;font:12px system-ui;pointer-events:none">Menghubungkan data market…</div></div></div>
+<div class="zoomGroup"><button class="btn zoomBtn" id="zoomOut" title="Zoom out">−</button><button class="btn zoomBtn" id="zoomIn" title="Zoom in">+</button><button class="btn zoomBtn" id="zoomReset" title="Reset zoom">↺</button></div><span class="chartHint">Pinch / wheel / tombol ± untuk zoom</span></div><div class="chartbox"><canvas id="chart" class="chart" aria-label="Grafik candlestick Binance Futures"></canvas><div id="chartStatus" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:20px;text-align:center;color:#8491a4;font:12px system-ui;pointer-events:none">Menghubungkan data market…</div></div></div></section><div class="grid"><main>
 <div class="liveStrip">
   <div class="liveBox" id="liveSignalBox"><small>FINAL SIGNAL · ENTRY BERIKUTNYA</small><b id="liveEntrySignal">WAIT</b><div class="sub" id="liveSignalScore">Menunggu konfirmasi</div></div>
   <div class="liveBox signalWait" id="liveMomentumBox"><small>AI CANDLE LIVE · BODY + WICK</small><b id="liveMomentumSignal">WAIT •</b><div class="sub" id="liveMomentumScore">Menunggu candle realtime</div></div>
@@ -305,4 +330,23 @@ body{background:#02070d!important;color:var(--ref-text)!important}
 <div class="sec"><h3>Buku Pesanan / Kedalaman</h3><div class="ob"><div><div class="note">BIDS</div><div id="bids" class="obside"></div></div><div><div class="note">ASKS</div><div id="asks" class="obside"></div></div></div><div class="row"><span>Spread</span><b id="spread">—</b></div><div class="row"><span>Imbalance</span><b id="imbalance">—</b></div></div>
 <div id="legacyAccountFields" style="display:none"><span id="balance">—</span><span id="availableBalance">—</span><span id="upnl">—</span><span id="liqPrice">—</span><span id="dd">—</span><button id="reconcile" type="button">Reconcile</button></div>
 </aside></div>
-<script src="/app.js?v=5.41.0"></script></body></html>
+
+<style>
+/* v5.41.3 — full-width chart on top, two-column workspace below */
+.chartStage{margin-left:198px;padding:12px 12px 0 14px;width:calc(100% - 198px)}
+.chartStage .panel{width:100%}
+.chartStage .chartbox{height:600px}
+.grid{margin-left:198px;grid-template-columns:minmax(0,1fr) 350px;align-items:start}
+.grid main{padding:12px 12px 18px 14px}
+@media(max-width:980px){
+  .chartStage{margin-left:0;width:100%;padding:9px 9px 0}
+  .chartStage .chartbox{height:500px}
+  .grid{margin-left:0;grid-template-columns:1fr}
+}
+@media(max-width:600px){
+  .chartStage{padding:7px 7px 0}
+  .chartStage .chartbox{height:430px}
+  .grid main{padding:8px}
+}
+</style>
+<script src="/app.js?v=5.41.3"></script></body></html>
