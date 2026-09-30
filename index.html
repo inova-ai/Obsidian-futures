@@ -1,5 +1,5 @@
 <!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>OBSIDIAN | Futures Intelligence v5.41.3</title><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#05070b"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Obsidian Futures">
+<title>OBSIDIAN | Futures Intelligence v5.41.4</title><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#05070b"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Obsidian Futures">
 <style>
 :root{--bg:#05070b;--p:#0b1017;--p2:#101722;--line:#1d2938;--txt:#edf2f7;--muted:#8491a4;--gold:#d9b56c;--g:#19d59b;--r:#ff5b7c;--b:#71a7ff;--c:#b78cff}
 *{box-sizing:border-box}body{margin:0;background:#05070b;color:var(--txt);font:12px Inter,system-ui,-apple-system,sans-serif}.top{height:58px;display:flex;align-items:center;gap:12px;padding:0 14px;border-bottom:1px solid var(--line);background:#080c12;position:sticky;top:0;z-index:5}.brand{font-weight:900;letter-spacing:.13em}.brand i{color:var(--gold);font-style:normal}.pair{font-size:16px;font-weight:800}.price{font-weight:800;color:var(--g);font-variant-numeric:tabular-nums}.grow{flex:1}.badge,.btn,select,input{border:1px solid var(--line);background:#0d141d;color:var(--txt);border-radius:7px;padding:7px}.badge{border-radius:16px;color:var(--muted)}button{cursor:pointer}.btn:hover{border-color:#526684}.btn.active{border-color:var(--gold);color:var(--gold)}.danger{color:var(--r);border-color:#6a2b3e}.grid{display:grid;grid-template-columns:minmax(0,1fr) 355px;min-height:calc(100vh - 58px)}main{padding:10px;min-width:0}.panel{background:linear-gradient(180deg,#0b1118,#080c12);border:1px solid var(--line);border-radius:12px;overflow:hidden}.toolbar{display:flex;gap:5px;align-items:center;padding:8px;border-bottom:1px solid var(--line);flex-wrap:wrap}.chartbox{height:560px;position:relative}.chart{width:100%;height:100%;touch-action:none}.side{padding:10px;border-left:1px solid var(--line);background:#070a0f;overflow:auto}.sec{background:#0a0f16;border:1px solid var(--line);border-radius:10px;padding:11px;margin-bottom:9px}.sec h3{text-transform:uppercase;letter-spacing:.1em;font-size:10px;color:#9ca8ba;margin:0 0 9px}.g2{display:grid;grid-template-columns:1fr 1fr;gap:7px}.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px}.field{display:grid;gap:4px;color:var(--muted)}.row{display:flex;justify-content:space-between;gap:8px;margin:7px 0}.good{color:var(--g)}.bad{color:var(--r)}.gold{color:var(--gold)}.blue{color:var(--b)}.full{width:100%}.note{color:var(--muted);font-size:10px;line-height:1.45}.meter{height:4px;background:#17202c;border-radius:8px;overflow:hidden}.meter>i{display:block;height:100%;background:var(--gold);width:0}.bottom{margin-top:10px}.tabs{display:flex;gap:3px;padding:8px;border-bottom:1px solid var(--line);overflow:auto}.tab{padding:7px 9px;color:var(--muted);cursor:pointer;white-space:nowrap}.tab.active{color:#fff;border-bottom:2px solid var(--gold)}.content{padding:10px}.table{width:100%;border-collapse:collapse}.table td,.table th{padding:7px;border-bottom:1px solid #17202b;text-align:left}.scroll{max-height:220px;overflow:auto}.ob{display:grid;grid-template-columns:1fr 1fr;gap:8px}.obside{font-variant-numeric:tabular-nums}.obrow{display:flex;justify-content:space-between;padding:3px 5px}.obrow span:last-child{color:var(--muted)}.statgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px}.stat{padding:7px;background:#0d141d;border-radius:7px}.stat small{display:block;color:var(--muted);font-size:9px}.stat b{font-size:12px}.calcCard{margin-top:8px;padding:10px;border:1px solid #2a3546;border-radius:9px;background:linear-gradient(180deg,#0d141d,#090e15)}.calcTitle{font-size:10px;font-weight:900;letter-spacing:.12em;color:var(--gold);margin-bottom:7px}.pill{display:inline-block;padding:2px 5px;border:1px solid var(--line);border-radius:10px;margin:1px}.switch{display:flex;align-items:center;gap:7px}.switch input{accent-color:var(--gold)}.dangerbox{border-color:#6a2b3e;background:#160b10}@media(max-width:980px){.grid{grid-template-columns:1fr}.side{border-left:0;border-top:1px solid var(--line)}.chartbox{height:470px}}@media(max-width:600px){.top{overflow:auto}.brand{min-width:max-content}.chartbox{height:390px}.g3{grid-template-columns:1fr 1fr}.side{padding:8px}}
@@ -240,7 +240,8 @@ body{background:#02070d!important;color:var(--ref-text)!important}
   <div class="railFoot"><span>v5.41.2</span><span><i></i> Online</span></div>
 </nav>
 <div id="authbar" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:20;align-items:center;justify-content:center"><div class="panel" style="width:min(420px,92vw);padding:18px"><h2>Obsidian Access</h2><div id="authmsg" class="note">Buat akun lokal atau login.</div><input id="au" placeholder="Username" style="width:100%;margin:6px 0;padding:10px"><input id="ap" type="password" placeholder="Password min 12 karakter" style="width:100%;margin:6px 0;padding:10px"><input id="ac" placeholder="2FA code (jika aktif)" style="width:100%;margin:6px 0;padding:10px"><div class="row"><button class="btn" id="aset">Setup</button><button class="btn active" id="alog">Login</button></div></div></div><header class="top"><div class="brand">OBSIDIAN <i>INTELLIGENCE v5</i></div><div class="pair" id="pair">BTCUSDT</div><div class="price" id="price">—</div><div class="grow"></div><div class="badge" id="conn">OFFLINE</div><div class="badge" id="mode">DEMO</div><div class="badge" id="accountMode">ACCOUNT —</div><button class="btn" id="installPwa" style="display:none">＋ PASANG APP</button><button class="btn danger" id="kill">KILL</button></header>
-<section id="credentialPanel" style="display:none;margin:12px 0;padding:12px;border:1px solid #293246;border-radius:12px;background:#111722"><h3 style="margin:0 0 8px">Binance API Credentials</h3><div class="g3"><label class="field">API Key<input id="apiKey" autocomplete="off"></label><label class="field">API Secret<input id="apiSecret" type="password" autocomplete="new-password"></label><label class="field">2FA Code<input id="credCode" inputmode="numeric" maxlength="6" placeholder="Jika 2FA aktif"></label></div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button class="btn" id="saveCred">Simpan Credential</button><button class="btn" id="removeCred">Hapus Credential</button><button class="btn" id="testBinance">Test Binance</button></div><div id="credStatus" class="note" style="margin-top:8px">Credential tersimpan di server dalam bentuk terenkripsi. Setelah disimpan, form tetap mempertahankan input agar tidak terlihat hilang. Untuk keamanan, jangan bagikan API Secret.</div></section><section class="chartStage"><div class="panel"><div class="toolbar">
+<section id="credentialPanel" style="display:none;margin:12px 0;padding:12px;border:1px solid #293246;border-radius:12px;background:#111722"><h3 style="margin:0 0 8px">Binance API Credentials</h3><div class="g3"><label class="field">API Key<input id="apiKey" autocomplete="off"></label><label class="field">API Secret<input id="apiSecret" type="password" autocomplete="new-password"></label><label class="field">2FA Code<input id="credCode" inputmode="numeric" maxlength="6" placeholder="Jika 2FA aktif"></label></div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button class="btn" id="saveCred">Simpan Credential</button><button class="btn" id="removeCred">Hapus Credential</button><button class="btn" id="testBinance">Test Binance</button></div><div id="credStatus" class="note" style="margin-top:8px">Credential tersimpan di server dalam bentuk terenkripsi. Setelah disimpan, form tetap mempertahankan input agar tidak terlihat hilang. Untuk keamanan, jangan bagikan API Secret.</div></section><div class="workspace">
+<section class="chartStage"><div class="panel"><div class="toolbar">
 <select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>BNBUSDT</option><option>SOLUSDT</option><option>XRPUSDT</option><option>DOGEUSDT</option><option>ADAUSDT</option></select>
 <select id="tf"><option>1m</option><option>3m</option><option selected>5m</option><option>15m</option><option>1h</option><option>4h</option><option>1d</option></select>
 <span id="analysisMode" class="badge" title="1 indikator saja: Supertrend · B/S realtime · order tetap dari LONG/SHORT">ORDER: LONG/SHORT · ANALISIS SAJA</span><button class="btn active" id="supertrendBtn">Supertrend · B/S</button><span class="note">1 indikator · realtime Binance</span><div style="display:none"><button class="btn active" id="emaBtn">EMA</button><button class="btn" id="bbBtn">BB</button><button class="btn" id="macdBtn">MACD</button><button class="btn" id="vwapBtn">VWAP</button><button class="btn" id="adxBtn">ADX</button><button class="btn" id="atrBtn">ATR</button></div>
@@ -330,9 +331,10 @@ body{background:#02070d!important;color:var(--ref-text)!important}
 <div class="sec"><h3>Buku Pesanan / Kedalaman</h3><div class="ob"><div><div class="note">BIDS</div><div id="bids" class="obside"></div></div><div><div class="note">ASKS</div><div id="asks" class="obside"></div></div></div><div class="row"><span>Spread</span><b id="spread">—</b></div><div class="row"><span>Imbalance</span><b id="imbalance">—</b></div></div>
 <div id="legacyAccountFields" style="display:none"><span id="balance">—</span><span id="availableBalance">—</span><span id="upnl">—</span><span id="liqPrice">—</span><span id="dd">—</span><button id="reconcile" type="button">Reconcile</button></div>
 </aside></div>
+</div>
 
 <style>
-/* v5.41.3 — full-width chart on top, two-column workspace below */
+/* v5.41.4 — full-width chart on top, two-column workspace below */
 .chartStage{margin-left:198px;padding:12px 12px 0 14px;width:calc(100% - 198px)}
 .chartStage .panel{width:100%}
 .chartStage .chartbox{height:600px}
@@ -349,4 +351,174 @@ body{background:#02070d!important;color:var(--ref-text)!important}
   .grid main{padding:8px}
 }
 </style>
-<script src="/app.js?v=5.41.3"></script></body></html>
+<script src="/app.js?v=5.41.4"></script>
+<style>
+/* v5.41.4 — reference UI layout + phone edge-to-edge responsive workspace */
+html,body{width:100%;max-width:100%;overflow-x:hidden}
+body{min-width:0}
+
+/* Desktop: left rail | center chart/orders | right analysis rail */
+.workspace{
+  margin-left:198px;
+  padding:10px 12px 16px 12px;
+  width:calc(100% - 198px);
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 340px;
+  grid-template-rows:auto auto;
+  gap:8px;
+  align-items:start;
+}
+.workspace .chartStage{
+  grid-column:1;
+  grid-row:1;
+  margin:0!important;
+  padding:0!important;
+  width:100%!important;
+  min-width:0;
+}
+.workspace .chartStage .panel{width:100%;min-width:0}
+.workspace .chartStage .chartbox{height:clamp(430px,calc(100vh - 365px),600px);min-height:360px}
+.workspace .grid{
+  display:contents;
+  margin:0!important;
+  min-height:0!important;
+}
+.workspace .grid main{
+  grid-column:1;
+  grid-row:2;
+  min-width:0;
+  padding:0!important;
+}
+.workspace .grid .side{
+  grid-column:2;
+  grid-row:1 / span 2;
+  min-width:0;
+  max-height:calc(100vh - 90px);
+  overflow:auto;
+  padding:0 0 0 8px!important;
+  border-left:1px solid #10253a!important;
+  background:transparent!important;
+}
+.workspace .grid .side>.sec:first-child{margin-top:0}
+
+/* Keep the center area visually close to the supplied reference */
+.workspace .toolbar{border-radius:12px 12px 0 0;overflow-x:auto;white-space:nowrap;flex-wrap:nowrap}
+.workspace .chartbox{border-radius:0 0 12px 12px}
+.workspace .liveStrip{margin-top:8px}
+.workspace .bottom{margin-top:8px}
+
+/* Phone: true edge-to-edge, no horizontal squeeze/overflow */
+@media(max-width:980px){
+  .workspace{
+    margin-left:0!important;
+    width:100%!important;
+    padding:8px!important;
+    grid-template-columns:minmax(0,1fr)!important;
+    grid-template-rows:auto auto auto!important;
+    gap:8px!important;
+  }
+  .workspace .chartStage{grid-column:1!important;grid-row:1!important}
+  .workspace .chartStage .chartbox{height:min(58svh,520px)!important;min-height:300px!important}
+  .workspace .grid main{grid-column:1!important;grid-row:2!important}
+  .workspace .grid .side{
+    grid-column:1!important;
+    grid-row:3!important;
+    max-height:none!important;
+    overflow:visible!important;
+    padding:0!important;
+    border-left:0!important;
+    border-top:1px solid #10253a!important;
+  }
+  .workspace .panel{width:100%!important}
+}
+
+@media(max-width:600px){
+  html,body{width:100vw;min-width:100vw}
+  .top{
+    width:100vw!important;
+    height:58px!important;
+    padding:0 7px!important;
+    gap:5px!important;
+    overflow:hidden!important;
+    position:sticky!important;
+    top:0!important;
+  }
+  .top .brand{min-width:0!important;max-width:105px!important;font-size:8px!important;letter-spacing:.12em!important;white-space:nowrap;overflow:hidden}
+  .top .brand:before{font-size:11px!important}
+  .top .brand i{display:none!important}
+  .top .pair{min-width:76px!important;font-size:11px!important;padding:7px 8px!important}
+  .top .price{display:block!important;font-size:10px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:105px}
+  .top .grow{display:none!important}
+  .top .badge{font-size:7px!important;padding:5px 6px!important;white-space:nowrap}
+  .top #mode,.top #accountMode,.top #installPwa{display:none!important}
+  .top #kill{font-size:8px!important;padding:6px 7px!important;margin-left:auto!important}
+
+  /* Bottom navigation uses the existing rail menu without consuming side width. */
+  .appRail{
+    display:flex!important;
+    position:fixed!important;
+    left:0!important;right:0!important;bottom:0!important;top:auto!important;
+    width:100vw!important;height:58px!important;
+    padding:5px 4px calc(5px + env(safe-area-inset-bottom))!important;
+    flex-direction:row!important;
+    align-items:stretch!important;
+    border-right:0!important;
+    border-top:1px solid #163149!important;
+    background:rgba(3,8,14,.97)!important;
+    box-shadow:0 -12px 30px rgba(0,0,0,.38)!important;
+    z-index:50!important;
+  }
+  .appRail:after,.railBrand,.railPromo,.railFoot{display:none!important}
+  .railMenu{
+    width:100%!important;
+    margin:0!important;
+    display:grid!important;
+    grid-template-columns:repeat(6,minmax(0,1fr))!important;
+    gap:2px!important;
+  }
+  .railItem{
+    min-height:0!important;
+    height:48px!important;
+    padding:3px 1px!important;
+    border-radius:8px!important;
+    flex-direction:column!important;
+    justify-content:center!important;
+    gap:2px!important;
+    font-size:7px!important;
+    text-align:center!important;
+  }
+  .railIcon{width:auto!important;font-size:15px!important;line-height:16px!important}
+
+  .workspace{
+    width:100vw!important;
+    padding:5px 5px calc(66px + env(safe-area-inset-bottom))!important;
+    gap:6px!important;
+  }
+  .workspace .chartStage .chartbox{height:calc(100svh - 330px)!important;min-height:285px!important;max-height:430px!important}
+  .workspace .toolbar{padding:6px!important;min-height:42px!important;border-radius:10px 10px 0 0!important;gap:4px!important}
+  .workspace .toolbar .btn,.workspace .toolbar select{padding:6px 7px!important;font-size:9px!important;flex:0 0 auto}
+  .workspace .toolbar .note,.workspace .chartHint{display:none!important}
+  .workspace .liveStrip{grid-template-columns:1fr 1fr!important;gap:5px!important}
+  .workspace .liveBox{min-height:58px!important;padding:8px!important}
+  .workspace .liveBox b{font-size:13px!important}
+  .workspace .livePositionHero{padding:10px!important}
+  .workspace .liveHeroGrid,.workspace .accountGrid,.workspace .positionGrid{grid-template-columns:1fr 1fr!important}
+  .workspace .sec{margin-bottom:6px!important;padding:9px!important}
+  .workspace .sec h3{font-size:9px!important}
+  .workspace .g2,.workspace .g3{gap:5px!important}
+  .workspace .btn{min-height:34px}
+  .workspace .tabs{padding:5px!important}
+  .workspace .tab{padding:8px 8px!important;font-size:9px!important}
+  .workspace .signalDropV4 .signalFeed{max-height:none!important}
+}
+
+@media(max-width:380px){
+  .top .brand{max-width:76px!important}
+  .top .pair{min-width:70px!important}
+  .top .price{max-width:80px!important}
+  .workspace .chartStage .chartbox{height:310px!important}
+  .railItem{font-size:6px!important}
+  .railIcon{font-size:14px!important}
+}
+</style>
+</body></html>
