@@ -134,3 +134,11 @@ Replace the previous package with this ZIP. Keep the existing Binance credential
 - Removed the chart education/lesson popover so the candlestick chart remains unobstructed.
 - Removed the Candle Learning navigation item.
 - Supertrend B/S, realtime candle, position, PnL, entry and execution controls remain unchanged.
+
+
+## v5.41.8 — Adaptive Candle Learning
+- Rolling walk-forward learning from closed candles only.
+- Learns wick/body, close-position, score bucket, direction and S/R-context patterns.
+- Historical hit rate nudges signal confidence; it never guarantees the next candle direction.
+- Adaptive OOS validation is available from the Uji Strategi tab.
+- Learning cache is rebuilt when the symbol/timeframe/last closed candle changes and can be reset manually.

@@ -1,0 +1,401 @@
+  const learningOk=learning?.hitRate==null ? true : Number(learning.hitRate)>=0.55;
+  const srCtx=pred?.sr?.context||'NO_LEVEL';
+  const srOk=side==='BUY' ? ['SUPPORT_REJECTION','BETWEEN_LEVELS'].includes(srCtx) : ['RESISTANCE_REJECTION','BETWEEN_LEVELS'].includes(srCtx);
+  const mtfRows=Object.values(S.mtf||{});
+  const mtfSide=side==='BUY'?'BULL':'BEAR';
+  const mtfMatches=mtfRows.filter(x=>x.dir===mtfSide).length;
+  const mtfOk=mtfRows.length<3 ? true : mtfMatches>=Math.ceil(mtfRows.length*0.6);
+  const scoreOk=Number(pred.score||0)>=65 && Number(pred.gap||0)>=4;
+  const checks={direction:scoreOk,learning:learningOk,sr:srOk,mtf:mtfOk};
+  const passed=Object.values(checks).filter(Boolean).length;
+  const score=Math.round(passed/4*100);
+  const ready=passed>=3 && scoreOk;
+  const reasons=[scoreOk?'score/gap OK':'score/gap belum cukup',learningOk?'learning mendukung':'learning belum mendukung',srOk?'S/R searah':'S/R belum ideal',mtfOk?`MTF ${mtfMatches}/${mtfRows.length} searah`:`MTF ${mtfMatches}/${mtfRows.length} searah`];
+  return {ready,score,checks,label:ready?'READY':'WAIT',reason:reasons.join(' · '),mtfMatches,mtfTotal:mtfRows.length};
+}
+function getSignalQuality(pred, readiness, riskPlan){
+  if(!pred || !['BUY','SELL'].includes(pred.side)) return {score:0,label:'WAIT',components:{},reason:'Arah belum confirmed'};
+  const r=readiness||getEntryReadiness(pred);
+  const rp=riskPlan||buildSmartRiskPlan(pred);
+  const candle=Math.max(0,Math.min(100,Number(pred.score||0)));
+  const readinessScore=Math.max(0,Math.min(100,Number(r.score||0)));
+  const learningRate=pred.learning?.hitRate;
+  const learning=learningRate==null?55:Math.max(0,Math.min(100,Number(learningRate)*100));
+  const ctx=pred.sr?.context||'NO_LEVEL';
+  const sr=ctx==='SUPPORT_REJECTION'||ctx==='RESISTANCE_REJECTION'?100:ctx==='BETWEEN_LEVELS'?72:40;
+  const mtfRows=Object.values(S.mtf||{});
+  const wanted=pred.side==='BUY'?'BULL':'BEAR';
+  const aligned=mtfRows.length?mtfRows.filter(x=>x.dir===wanted).length/mtfRows.length:0.5;
+  const mtf=Math.round(Math.max(0,Math.min(1,aligned))*100);
+  const rr=Number(rp?.rr1||0);
+  const risk=rr>=2.5?100:rr>=2?90:rr>=1.5?75:rr>0?45:0;
+  const score=Math.round(candle*.25+readinessScore*.25+learning*.15+sr*.15+mtf*.10+risk*.10);
+  const label=score>=80?'A':score>=65?'B':score>=50?'C':'WAIT';
+  const reason=`Candle ${Math.round(candle)} · Readiness ${Math.round(readinessScore)} · Learning ${Math.round(learning)} · S/R ${Math.round(sr)} · MTF ${Math.round(mtf)} · Risk ${Math.round(risk)}`;
+  return {score,label,components:{candle,readiness:readinessScore,learning,sr,mtf,risk},reason};
+}
+function signalQualityText(q){return q?.score?`QUALITY ${q.label} ${q.score}/100`:'QUALITY WAIT';}
+function buildSmartRiskPlan(pred){
+  const a=(pred?.closed&&pred.closed.length?pred.closed:S.c.slice(0,-1).length?S.c.slice(0,-1):S.c);
+  if(!a.length||!pred||!['BUY','SELL'].includes(pred.side)) return {valid:false,side:'WAIT'};
+  const entry=Number(pred.last?.c||a.at(-1)?.c||0);
+  const atr=Number(pred.atr||ATR(a).at(-1)||0);
+  if(!entry||!atr) return {valid:false,side:pred.side};
+  const sr=pred.sr||detectSR(a);
+  const buffer=Math.max(atr*0.18,entry*0.00035);
+  const zone=Math.max(atr*0.22,entry*0.00045);
+  const rrTarget=Math.max(1.5,Number($('rr')?.value||2));
+  let sl,tp1,tp2,entryLow,entryHigh;
+  if(pred.side==='BUY'){
+    const support=Number(sr?.support||0);
+    sl=(support>0&&support<entry)?Math.min(entry-atr*0.75,support-buffer):entry-atr*1.25;
+    const risk=Math.max(entry-sl,atr*0.55);
+    sl=entry-risk;
+    entryLow=entry-zone; entryHigh=entry+zone;
+    const resistance=Number(sr?.resistance||0);
+    const rr1=entry+risk*1.5, rr2=entry+risk*rrTarget;
+    tp1=resistance>entry ? Math.max(rr1,Math.min(resistance,entry+risk*1.15)) : rr1;
+    tp2=Math.max(rr2,tp1+risk*0.5);
+  }else{
+    const resistance=Number(sr?.resistance||0);
+    sl=(resistance>entry)?Math.max(entry+atr*0.75,resistance+buffer):entry+atr*1.25;
+    const risk=Math.max(sl-entry,atr*0.55);
+    sl=entry+risk;
+    entryLow=entry-zone; entryHigh=entry+zone;
+    const support=Number(sr?.support||0);
+    const rr1=entry-risk*1.5, rr2=entry-risk*rrTarget;
+    tp1=support>0&&support<entry ? Math.min(rr1,Math.max(support,entry-risk*1.15)) : rr1;
+    tp2=Math.min(rr2,tp1-risk*0.5);
+  }
+  const riskDist=Math.abs(entry-sl), rr1=Math.abs(tp1-entry)/Math.max(riskDist,1e-12), rr2=Math.abs(tp2-entry)/Math.max(riskDist,1e-12);
+  const valid=Number.isFinite(sl)&&Number.isFinite(tp1)&&Number.isFinite(tp2)&&riskDist>0&&((pred.side==='BUY'&&sl<entry&&tp1>entry&&tp2>entry)||(pred.side==='SELL'&&sl>entry&&tp1<entry&&tp2<entry));
+  return {valid,side:pred.side,entry,entryLow,entryHigh,sl,tp1,tp2,atr,riskDistance:riskDist,rr1,rr2,context:sr?.context||'NO_LEVEL',support:sr?.support||null,resistance:sr?.resistance||null};
+}
+function riskPlanText(r){
+  if(!r?.valid)return 'RISK PLAN WAIT';
+  return `ENTRY ${fmtIDR(r.entryLow)}–${fmtIDR(r.entryHigh)} · SL ${fmtIDR(r.sl)} · TP1 ${fmtIDR(r.tp1)} · TP2 ${fmtIDR(r.tp2)} · R:R ${r.rr1.toFixed(1)} / ${r.rr2.toFixed(1)}`;
+}
+
+
+function buildSignalFeatureSnapshot(pred){
+  const cp=pred?.candlePrediction?.candle||pred?.candle||{};
+  const mtfRows=Object.values(S.mtf||{});
+  const wanted=pred?.side==='BUY'?'BULL':'BEAR';
+  const mtfAligned=mtfRows.filter(x=>x.dir===wanted).length;
+  const mtfTotal=mtfRows.length;
+  const learningRate=pred?.learning?.hitRate;
+  return {
+    side:pred?.side||'WAIT', score:Number(pred?.score||0), gap:Number(pred?.gap||0),
+    context:String(pred?.sr?.context||'NO_LEVEL'),
+    mtfAligned, mtfTotal,
+    bodyPct:Number(cp.bodyPct||0), upperWickPct:Number(cp.upperWickPct||0), lowerWickPct:Number(cp.lowerWickPct||0), closePos:Number(cp.closePos??50),
+    momentumSide:String(pred?.momentum?.side||'WAIT'), momentumScore:Number(pred?.momentum?.score||0),
+    learningRate:learningRate==null?null:Number(learningRate), capturedAt:Date.now()
+  };
+}
+function signalFeatureDistance(a,b){
+  if(!a||!b)return 999;
+  let d=0,n=0;
+  const add=(x,y,scale=100)=>{if(Number.isFinite(Number(x))&&Number.isFinite(Number(y))){d+=Math.min(1,Math.abs(Number(x)-Number(y))/scale);n++;}};
+  if(a.side&&b.side){d+=(a.side===b.side?0:0.8);n++;}
+  if(a.context&&b.context){d+=(a.context===b.context?0:0.35);n++;}
+  add(a.score,b.score,40); add(a.gap,b.gap,25); add(a.bodyPct,b.bodyPct,50); add(a.upperWickPct,b.upperWickPct,50); add(a.lowerWickPct,b.lowerWickPct,50); add(a.closePos,b.closePos,50); add(a.momentumScore,b.momentumScore,50);
+  if(a.mtfTotal&&b.mtfTotal){d+=Math.min(1,Math.abs((a.mtfAligned/a.mtfTotal)-(b.mtfAligned/b.mtfTotal))*1.5);n++;}
+  return n?d/n:999;
+}
+function findHistoricalSimilarSetups(pred){
+  if(!pred||!['BUY','SELL'].includes(pred.side))return {count:0,hit:0,miss:0,neutral:0,rate:null,partial:false,items:[]};
+  const current=buildSignalFeatureSnapshot(pred);
+  const pool=SIGNALS.filter(x=>x.symbol===S.symbol&&x.tf===S.tf&&x.status==='CLOSED'&&['BUY','SELL'].includes(x.side)&&x.side===pred.side);
+  const scored=pool.map(x=>({row:x,distance:signalFeatureDistance(current,x.featureSnapshot||{side:x.side,score:x.score,gap:x.gap,context:x.context,mtfAligned:Object.values(x.mtf||{}).filter(v=>v.dir===(x.side==='BUY'?'BULL':'BEAR')).length,mtfTotal:Object.values(x.mtf||{}).length})})).sort((a,b)=>a.distance-b.distance).slice(0,8);
+  const close=scored.filter(x=>x.distance<=0.42);
+  const use=close.length>=3?close:scored.slice(0,Math.min(5,scored.length));
+  const hit=use.filter(x=>x.row.outcome==='HIT').length,miss=use.filter(x=>x.row.outcome==='MISS').length,neutral=use.filter(x=>x.row.outcome==='NEUTRAL').length;
+  const decided=hit+miss;
+  return {count:use.length,hit,miss,neutral,rate:decided?hit/decided:null,partial:close.length<3,items:use};
+}
+function getSignalLifecycle(pred){
+  if(!pred||!['BUY','SELL'].includes(pred.side))return {state:'WAIT',detail:'Menunggu BUY/SELL terkonfirmasi.'};
+  const tf=$('signalTf')?.value||S.tf, ms=tfMillis(tf), anchorTs=Number(pred.anchorTs||pred.targetTs||S.c.at(-1)?.t||0), targetTs=Number(pred.targetTs||anchorTs+ms);
+  const row=SIGNALS.find(x=>x.symbol===S.symbol&&x.tf===tf&&Number(x.targetTs)===targetTs);
+  if(row?.status==='CLOSED')return {state:row.outcome==='HIT'?'TP / HIT':row.outcome==='MISS'?'SL / MISS':'CLOSED',detail:`Signal ${row.outcome||'selesai'} pada candle target ${signalTime(targetTs)}.`,row};
+  const now=Date.now();
+  if(now<targetTs)return {state:'FORMING',detail:`Setup dibentuk pada ${signalTime(anchorTs)} dan menunggu candle target ${signalTime(targetTs)}.`};
+  const risk=pred.riskPlan||buildSmartRiskPlan(pred), price=Number(S.c.at(-1)?.c||0);
+  if(risk?.valid){
+    const invalid=pred.side==='BUY'?price<=risk.sl:price>=risk.sl;
+    const tp=pred.side==='BUY'?price>=risk.tp1:price<=risk.tp1;
+    if(invalid)return {state:'INVALIDATED',detail:`Harga ${fmtIDR(price)} sudah melewati batas invalidation/SL ${fmtIDR(risk.sl)}.`,row};
+    if(tp)return {state:'TP1 REACHED',detail:`Harga ${fmtIDR(price)} sudah mencapai zona TP1 ${fmtIDR(risk.tp1)}.`,row};
+  }
+  return {state:'ACTIVE',detail:`Signal ${pred.side} masih aktif; belum mencapai invalidation maupun TP1.`,row};
+}
+function getAntiChase(pred){
+  const r=pred?.riskPlan||buildSmartRiskPlan(pred), price=Number(S.c.at(-1)?.c||0);
+  if(!r?.valid||!price)return {level:'WAIT',text:'Entry zone belum tersedia.'};
+  const half=Math.max(1e-12,Math.abs(r.entryHigh-r.entryLow)/2), center=(r.entryLow+r.entryHigh)/2;
+  const dist=Math.abs(price-center), pct=dist/Math.max(1e-12,half)*100;
+  if((pred.side==='BUY'&&price>r.entryHigh)||(pred.side==='SELL'&&price<r.entryLow)){
+    return {level:'CHASE',text:`Harga ${fmtIDR(price)} sudah berada di luar entry zone ${fmtIDR(r.entryLow)}–${fmtIDR(r.entryHigh)}. Jangan mengejar signal; tunggu harga kembali ke zona atau setup baru.`};
+  }
+  if(pct>65)return {level:'CAUTION',text:`Harga mulai menjauh dari pusat entry zone (${Math.round(pct)}% dari lebar acuan). Entry sekarang kurang ideal dibanding area ${fmtIDR(r.entryLow)}–${fmtIDR(r.entryHigh)}.`};
+  return {level:'OK',text:`Harga masih berada dalam entry zone ${fmtIDR(r.entryLow)}–${fmtIDR(r.entryHigh)}; jarak dari pusat zona sekitar ${Math.round(pct)}%.`};
+}
+function getSignalInvalidation(pred){
+  const r=pred?.riskPlan||buildSmartRiskPlan(pred), price=Number(S.c.at(-1)?.c||0);
+  if(!r?.valid)return {level:'WAIT',text:'Belum dapat menentukan invalidation karena risk plan belum valid.'};
+  const invalid=pred.side==='BUY'?price<=r.sl:price>=r.sl;
+  const near=pred.side==='BUY'?price<=r.sl+(r.entry-(r.sl))*0.2:price>=r.sl-(r.sl-r.entry)*0.2;
+  if(invalid)return {level:'INVALID',text:`Signal invalid jika/karena harga berada di ${fmtIDR(price)}, melewati batas ${fmtIDR(r.sl)}.`};
+  return {level:near?'NEAR':'CLEAR',text:`Batas invalidation: ${fmtIDR(r.sl)}. ${near?'Harga sudah mendekati batas ini; konfirmasi berikutnya perlu lebih ketat.':'Selama struktur dan harga tidak menembus batas ini, setup belum dianggap invalid.'}`};
+}
+
+
+/* Signal Explanation Engine
+   Uses the exact FINAL SIGNAL inputs already used by the app. It explains
+   WHY BUY/SELL appeared; it does not create or override the signal. */
+function buildSignalExplanation(pred){
+  if(!pred||!['BUY','SELL'].includes(pred.side)){
+    return {side:'WAIT',title:'Belum ada BUY/SELL yang terkonfirmasi',
+      summary:'Signal Explanation Engine menunggu arah yang cukup kuat sebelum menjelaskan setup.',
+      sections:[]};
+  }
+  const side=pred.side, bull=side==='BUY';
+  const cp=pred.candlePrediction?.candle||pred.candle||{};
+  const body=Number(cp.bodyPct||0), upper=Number(cp.upperWickPct||0), lower=Number(cp.lowerWickPct||0);
+  const closePos=Number(cp.closePos??50);
+  const momentum=pred.momentum||getRealtimeMomentum()||{};
+  const sr=pred.sr||{};
+  const learning=pred.learning||{};
+  const readiness=pred.readiness||getEntryReadiness(pred);
+  const risk=pred.riskPlan||buildSmartRiskPlan(pred);
+  const mtfRows=Object.values(S.mtf||{});
+  const wanted=side==='BUY'?'BULL':'BEAR';
+  const mtfAligned=mtfRows.filter(x=>x.dir===wanted).length;
+  const mtfTotal=mtfRows.length;
+  const fmtPct=x=>`${Math.round(Number(x)||0)}%`;
+  const directionWord=side==='BUY'?'bullish':'bearish';
+
+  let candleText;
+  if(bull){
+    if(lower>=upper+8) candleText=`Body ${fmtPct(body)} dengan lower wick ${fmtPct(lower)} menunjukkan rejection dari bawah; buyer merespons area harga rendah.`;
+    else if(body>=55&&closePos>=68) candleText=`Body relatif kuat (${fmtPct(body)}) dan close berada tinggi (${fmtPct(closePos)} dari range), sehingga tekanan buyer lebih dominan.`;
+    else candleText=`Struktur candle masih condong bullish: body ${fmtPct(body)}, lower wick ${fmtPct(lower)}, upper wick ${fmtPct(upper)}, close-position ${fmtPct(closePos)}.`;
+  }else{
+    if(upper>=lower+8) candleText=`Body ${fmtPct(body)} dengan upper wick ${fmtPct(upper)} menunjukkan rejection dari atas; seller merespons area harga tinggi.`;
+    else if(body>=55&&closePos<=32) candleText=`Body relatif kuat (${fmtPct(body)}) dan close berada rendah (${fmtPct(closePos)} dari range), sehingga tekanan seller lebih dominan.`;
+    else candleText=`Struktur candle masih condong bearish: body ${fmtPct(body)}, upper wick ${fmtPct(upper)}, lower wick ${fmtPct(lower)}, close-position ${fmtPct(closePos)}.`;
+  }
+
+  let srText;
+  const ctx=String(sr.context||'NO_LEVEL');
+  if(ctx==='SUPPORT_REJECTION') srText=`Harga bereaksi di support ${sr.support?fmt(sr.support):'—'} dan wick menembus area lalu close kembali di atasnya; ini mendukung BUY.`;
+  else if(ctx==='RESISTANCE_REJECTION') srText=`Harga bereaksi di resistance ${sr.resistance?fmt(sr.resistance):'—'} dan wick menembus area lalu close kembali di bawahnya; ini mendukung SELL.`;
+  else if(ctx==='NEAR_SUPPORT') srText=`Harga sedang dekat support ${sr.support?fmt(sr.support):'—'}; area ini menjadi acuan apakah buyer mampu mempertahankan harga.`;
+  else if(ctx==='NEAR_RESISTANCE') srText=`Harga sedang dekat resistance ${sr.resistance?fmt(sr.resistance):'—'}; area ini menjadi acuan apakah seller mampu menahan harga.`;
+  else srText=`Harga berada di antara level S/R utama${sr.support||sr.resistance?' · support '+(sr.support?fmt(sr.support):'—')+' · resistance '+(sr.resistance?fmt(sr.resistance):'—'):''}.`;
+
+  const momSide=momentum.side||'WAIT', momScore=Number(momentum.score||0);
+  const momentumText=momSide===side
+    ? `Momentum realtime searah ${side} (${momScore}/100): tekanan ${directionWord} masih terlihat pada candle yang sedang berjalan.`
+    : momSide==='WAIT'
+      ? `Momentum realtime belum kuat (${momScore}/100), jadi timing entry tetap perlu menunggu konfirmasi.`
+      : `Momentum realtime sedang ${momSide} (${momScore}/100), berlawanan dengan signal ${side}; ini menjadi faktor kehati-hatian, bukan pembatal otomatis.`;
+
+  const learningText=learning.hitRate!=null
+    ? `Learning menemukan hit rate historis ${Math.round(Number(learning.hitRate)*100)}% dari ${Number(learning.featureSamples||learning.samples||0)} sample pola; adjustment confidence ${Number(learning.adjustment||0)>=0?'+':''}${Number(learning.adjustment||0)}.`
+    : `Learning belum punya sample pola yang cukup untuk memberi hit rate spesifik; model tidak menambah arah baru dan confidence learning dinetralkan.`;
+
+  const mtfText=mtfTotal
+    ? `MTF searah ${mtfAligned}/${mtfTotal} timeframe (${Math.round(mtfAligned/mtfTotal*100)}%).`
+    : 'MTF belum tersedia, sehingga konfirmasi antar-timeframe belum dapat dihitung.';
+
+  const riskText=risk?.valid
+    ? `Risk plan: entry ${fmtIDR(risk.entryLow)}–${fmtIDR(risk.entryHigh)}, SL ${fmtIDR(risk.sl)}, TP1 ${fmtIDR(risk.tp1)}, TP2 ${fmtIDR(risk.tp2)}, R:R ${Number(risk.rr1||0).toFixed(1)} / ${Number(risk.rr2||0).toFixed(1)}. Jika struktur/SL invalid, setup dianggap batal.`
+    : 'Risk plan belum valid; jangan menganggap BUY/SELL sebagai setup entry lengkap sebelum Entry, SL, dan TP tersedia.';
+
+  const summary=`${side} muncul karena struktur candle ${directionWord}, reaksi S/R, konteks MTF, dan adaptive learning membentuk konfluensi yang cukup. ${momentum.side===side?'Momentum realtime ikut mendukung.':'Momentum realtime belum sepenuhnya mendukung, jadi timing perlu diperhatikan.'}`;
+  const quality=pred.quality||getSignalQuality(pred,readiness,risk);
+  const confidence=quality.components||{};
+  const lifecycle=getSignalLifecycle(pred);
+  const antiChase=getAntiChase(pred);
+  const invalidation=getSignalInvalidation(pred);
+  const similar=findHistoricalSimilarSetups(pred);
+  const conflict=getSignalConflict(pred);
+  const decision=getDecisionGate(pred,readiness,quality,risk);
+  const entryZone=getEntryZoneIntelligence(pred);
+  const similarText=similar.count
+    ? `${similar.count} setup historis ${side} yang paling mirip ditemukan: ${similar.hit} HIT, ${similar.miss} MISS${similar.neutral?`, ${similar.neutral} netral`:''}. ${similar.rate!=null?`Hit rate pada sample mirip ${Math.round(similar.rate*100)}%.`:''}${similar.partial?' Match fitur terbatas karena sebagian riwayat lama belum menyimpan snapshot fitur.':''}`
+    : 'Belum ada sample historis yang cukup mirip pada pair dan timeframe ini.';
+  return {
+    side,title:`KENAPA MUNCUL ${side}?`,
+    summary,
+    confidence,quality,lifecycle,antiChase,invalidation,similar,similarText,conflict,decision,entryZone,
+    sections:[
+      {key:'candle',label:'WICK + BODY',text:candleText,tag:`Body ${fmtPct(body)} · Upper ${fmtPct(upper)} · Lower ${fmtPct(lower)}`},
+      {key:'sr',label:'S/R REACTION',text:srText,tag:ctx.replaceAll('_',' ')},
+      {key:'mtf',label:'MTF',text:mtfText,tag:`${mtfAligned}/${mtfTotal || 0} searah`},
+      {key:'learning',label:'LEARNING',text:learningText,tag:learning.hitRate!=null?`${Math.round(Number(learning.hitRate)*100)}% hit`:'WAIT'},
+      {key:'momentum',label:'MOMENTUM',text:momentumText,tag:`${momSide} ${momScore}/100`},
+      {key:'risk',label:'RISK PLAN',text:riskText,tag:risk?.valid?`R:R ${Number(risk.rr1||0).toFixed(1)}`:'WAIT'}
+    ],
+    readiness
+  };
+}
+function getSignalConflict(pred){
+  if(!pred||!['BUY','SELL'].includes(pred.side)) return {level:'WAIT',count:0,items:[],text:'Belum ada signal untuk dianalisis.'};
+  const side=pred.side, wanted=side==='BUY'?'BULL':'BEAR';
+  const mtf=Object.values(S.mtf||{});
+  const items=[];
+  const opposite=mtf.filter(x=>x?.dir && x.dir!==wanted && x.dir!=='NEUTRAL').length;
+  if(mtf.length && opposite) items.push(`MTF ${opposite}/${mtf.length} timeframe berlawanan`);
+  const mom=pred.momentum||getRealtimeMomentum()||{};
+  if(mom.side && mom.side!=='WAIT' && mom.side!==side) items.push(`momentum ${mom.side} ${Number(mom.score||0)}/100`);
+  const ctx=String(pred.sr?.context||'NO_LEVEL');
+  const srOpp=(side==='BUY'&&ctx==='RESISTANCE_REJECTION')||(side==='SELL'&&ctx==='SUPPORT_REJECTION');
+  if(srOpp) items.push(`reaksi S/R saat ini cenderung ${ctx.replaceAll('_',' ').toLowerCase()}`);
+  const score=Number(pred.score||0), gap=Number(pred.gap||0);
+  if(score<60 || gap<8) items.push(`score/gap belum lebar (${score}/${gap})`);
+  const level=items.length>=2?'MAJOR CONFLICT':items.length===1?'MINOR CONFLICT':'ALIGNED';
+  const text=items.length?`${items.length} konflik terdeteksi: ${items.join(' · ')}.`:'Tidak ditemukan konflik utama antara MTF, momentum, S/R, dan score.';
+  return {level,count:items.length,items,text};
+}
+function getDecisionGate(pred, readiness, quality, risk){
+  if(!pred||!['BUY','SELL'].includes(pred.side)) return {state:'WAIT',reasons:['Belum ada BUY/SELL terkonfirmasi.'],hard:0};
+  const r=readiness||getEntryReadiness(pred), q=quality||getSignalQuality(pred,r,risk), rp=risk||buildSmartRiskPlan(pred), conflict=getSignalConflict(pred);
+  const reasons=[]; let hard=0;
+  if(!rp?.valid){reasons.push('Risk plan belum valid');hard++;}
+  if(Number(r.score||0)<50){reasons.push(`readiness rendah (${Math.round(Number(r.score||0))}%)`);hard++;}
+  if(Number(q.score||0)<50){reasons.push(`quality rendah (${Math.round(Number(q.score||0))}/100)`);hard++;}
+  if(conflict.level==='MAJOR CONFLICT'){reasons.push('terdapat konflik utama antar konfirmasi');hard++;}
+  if(rp?.valid && Number(rp.rr1||0)<1.5){reasons.push(`R:R TP1 hanya ${Number(rp.rr1||0).toFixed(1)}`);hard++;}
+  if(hard) return {state:'NO-TRADE',reasons,hard,conflict};
+  if(conflict.level==='MINOR CONFLICT' || Number(q.score||0)<65) return {state:'CAUTION',reasons:[...reasons,'setup masih membutuhkan kehati-hatian'],hard,conflict};
+  return {state:'READY',reasons:['Konfirmasi utama cukup selaras untuk dipantau'],hard,conflict};
+}
+function getEntryZoneIntelligence(pred){
+  const r=pred?.riskPlan||buildSmartRiskPlan(pred), price=Number(S.c.at(-1)?.c||0);
+  if(!r?.valid||!price)return {state:'WAIT',text:'Entry zone belum tersedia.'};
+  const width=Math.max(1e-12,Math.abs(r.entryHigh-r.entryLow));
+  const inside=price>=r.entryLow&&price<=r.entryHigh;
+  const late=pred.side==='BUY'?price>r.entryHigh:price<r.entryLow;
+  const adverse=pred.side==='BUY'?price<r.entryLow:price>r.entryHigh;
+  let state='IDEAL',text=`Harga ${fmtIDR(price)} berada dalam zona entry ${fmtIDR(r.entryLow)}–${fmtIDR(r.entryHigh)}.`;
+  if(late){state='LATE';text=`Harga ${fmtIDR(price)} sudah melewati sisi entry yang ideal. Zona acuan ${fmtIDR(r.entryLow)}–${fmtIDR(r.entryHigh)}; hindari mengejar harga.`;}
+  else if(adverse){state='WAIT-PULLBACK';text=`Harga ${fmtIDR(price)} berada di luar sisi entry yang diharapkan. Tunggu struktur kembali valid sebelum mempertimbangkan entry.`;}
+  else if(inside){const pos=Math.round(((price-r.entryLow)/width)*100);text+=` Posisi dalam zona sekitar ${pos}%.`;}
+  return {state,text,low:r.entryLow,high:r.entryHigh,price};
+}
+function getMarketRegime(){
+  const a=S.c||[];
+  if(a.length<30)return {regime:'UNKNOWN',label:'DATA INSUFFICIENT',score:0,text:'Data candle belum cukup untuk menentukan regime pasar.'};
+  const closes=a.map(x=>Number(x.c)||0), last=closes.at(-1), e20=EMA(closes,20).at(-1), e50=EMA(closes,50).at(-1), adx=ADX(a).at(-1)||0, atr=ATR(a).at(-1)||0;
+  const recent=a.slice(-20), range=Math.max(...recent.map(x=>x.h))-Math.min(...recent.map(x=>x.l));
+  const avgBody=recent.reduce((n,x)=>n+Math.abs(x.c-x.o),0)/recent.length;
+  const atrPct=last?atr/last*100:0, slope=e50?((e20-e50)/e50*100):0;
+  let regime='RANGE',label='RANGING',score=55;
+  if(adx>=25 && Math.abs(slope)>=0.25){regime=slope>0?'TREND_UP':'TREND_DOWN';label=slope>0?'UPTREND':'DOWNTREND';score=Math.min(100,65+Math.round(adx));}
+  else if(atrPct>=1.2 && range/last*100>=2.5){regime='HIGH_VOLATILITY';label='HIGH VOLATILITY';score=70;}
+  else if(Math.abs(slope)<0.12 && adx<20){regime='RANGE';label='RANGING';score=72;}
+  else if(adx>=22){regime=slope>=0?'TREND_UP':'TREND_DOWN';label=slope>=0?'MILD UPTREND':'MILD DOWNTREND';score=62;}
+  const detail=`EMA20/50 gap ${slope.toFixed(2)}% · ADX ${Number(adx).toFixed(1)} · ATR ${atrPct.toFixed(2)}% · range 20 candle ${(range/last*100).toFixed(2)}%.`;
+  return {regime,label,score,text:`Market saat ini terdeteksi ${label.toLowerCase()}. ${detail}`};
+}
+function getStrategyMatch(pred){
+  const r=getMarketRegime();
+  if(!pred||!['BUY','SELL'].includes(pred.side))return {state:'WAIT',score:0,text:'Menunggu BUY/SELL untuk mencocokkan strategi dengan regime.'};
+  const side=pred.side;
+  let score=60, reasons=[];
+  if(r.regime==='TREND_UP'){score+=side==='BUY'?25:-20;reasons.push(side==='BUY'?'arah BUY sejalan dengan uptrend':'SELL melawan uptrend');}
+  else if(r.regime==='TREND_DOWN'){score+=side==='SELL'?25:-20;reasons.push(side==='SELL'?'arah SELL sejalan dengan downtrend':'BUY melawan downtrend');}
+  else if(r.regime==='RANGE'){score+=15;reasons.push('range cocok untuk reaction S/R, tetapi breakout perlu diwaspadai');}
+  else if(r.regime==='HIGH_VOLATILITY'){score-=5;reasons.push('volatility tinggi meningkatkan risiko false break dan SL cepat tersentuh');}
+  const conflict=getSignalConflict(pred); if(conflict.level==='MAJOR CONFLICT')score-=15; else if(conflict.level==='MINOR CONFLICT')score-=5;
+  score=Math.max(0,Math.min(100,score));
+  const state=score>=75?'MATCH':score>=55?'CAUTION':'MISMATCH';
+  return {state,score,regime:r.regime,text:`${state}: ${reasons.join(' · ')}. ${r.text}`};
+}
+function getDynamicRiskMonitor(pred){
+  if(!pred||!['BUY','SELL'].includes(pred.side))return {state:'WAIT',items:[],text:'Menunggu signal aktif.'};
+  const r=pred.riskPlan||buildSmartRiskPlan(pred), price=Number(S.c.at(-1)?.c||0), mom=pred.momentum||getRealtimeMomentum()||{};
+  if(!r?.valid||!price)return {state:'WAIT',items:[],text:'Risk plan belum valid.'};
+  const items=[]; let danger=0;
+  const adverse=pred.side==='BUY'?(r.entry-r.sl):(r.sl-r.entry);
+  const dist=pred.side==='BUY'?price-r.sl:r.sl-price;
+  const proximity=adverse>0?dist/adverse:0;
+  if(proximity<0.25){items.push('Harga mendekati SL/invalidation');danger+=2;} else if(proximity<0.5){items.push('buffer ke SL mulai menipis');danger++;}
+  if(mom.side && mom.side!==pred.side && mom.side!=='WAIT'){items.push(`momentum ${mom.side} berlawanan`);danger++;}
+  const regime=getMarketRegime();
+  if(regime.regime==='HIGH_VOLATILITY'){items.push('volatility tinggi');danger++;}
+  const tp=pred.side==='BUY'?price>=r.tp1:price<=r.tp1;
+  if(tp)items.push('TP1 sudah tersentuh');
+  const state=danger>=2?'DANGER':danger===1?'CAUTION':'STABLE';
+  return {state,items,text:items.length?items.join(' · '):'Tidak ada perubahan risiko utama yang terdeteksi; tetap pantau invalidation dan momentum.'};
+}
+function renderMarketIntelligence(pred){
+  const host=$('marketIntelligence'); if(!host)return;
+  const regime=getMarketRegime(), match=getStrategyMatch(pred), risk=getDynamicRiskMonitor(pred);
+  const tone=x=>x==='DANGER'||x==='MISMATCH'?'bad':x==='CAUTION'?'gold':'good';
+  host.innerHTML=`<div class="sxeIntelGrid marketIntelGrid">
+    <div class="sxeIntel sxeWide"><div class="sxeIntelTitle">MARKET REGIME</div><b class="sxeState ${tone(regime.label)}">${regime.label}</b><div class="sxeIntelText">${regime.text}</div></div>
+    <div class="sxeIntel"><div class="sxeIntelTitle">STRATEGY MATCH</div><b class="sxeState ${tone(match.state)}">${match.state} · ${match.score}/100</b><div class="sxeIntelText">${match.text}</div></div>
+    <div class="sxeIntel"><div class="sxeIntelTitle">DYNAMIC RISK MONITOR</div><b class="sxeState ${tone(risk.state)}">${risk.state}</b><div class="sxeIntelText">${risk.text}</div></div>
+  </div>`;
+}
+
+function renderSignalExplanation(pred){
+  const el=$('signalExplanation');
+  if(!el)return;
+  const ex=buildSignalExplanation(pred);
+  if(ex.side==='WAIT'){
+    el.innerHTML=`<div class="sxeHead"><div><span class="label">SIGNAL EXPLANATION ENGINE</span><b>${ex.title}</b></div></div><div class="sxeSummary">${ex.summary}</div>`;
+    return;
+  }
+  const tone=ex.side==='BUY'?'buy':'sell';
+  el.innerHTML=`<div class="sxeHead"><div><span class="label">SIGNAL EXPLANATION ENGINE</span><b class="${tone}">${ex.title}</b></div><span class="sxeBadge ${tone}">${pred.score}/100 · ${pred.strength}</span></div>
+  <div class="sxeSummary">${ex.summary}</div>
+  <div class="sxeGrid">${ex.sections.map(s=>`<div class="sxeItem"><div class="sxeItemHead"><b>${s.label}</b><span>${s.tag}</span></div><div>${s.text}</div></div>`).join('')}</div>
+  <div class="sxeIntelGrid">
+    <div class="sxeIntel"><div class="sxeIntelTitle">CONFIDENCE BREAKDOWN</div>${Object.entries(ex.confidence||{}).map(([k,v])=>`<div class="sxeBarRow"><span>${k.toUpperCase()}</span><b>${Math.round(Number(v)||0)}</b><i><em style="width:${Math.max(0,Math.min(100,Number(v)||0))}%"></em></i></div>`).join('')}</div>
+    <div class="sxeIntel"><div class="sxeIntelTitle">SIGNAL LIFECYCLE</div><b class="sxeState ${String(ex.lifecycle.state).includes('INVALID')?'bad':String(ex.lifecycle.state).includes('HIT')||String(ex.lifecycle.state).includes('TP')?'good':'gold'}">${ex.lifecycle.state}</b><div class="sxeIntelText">${ex.lifecycle.detail}</div></div>
+    <div class="sxeIntel"><div class="sxeIntelTitle">ANTI-CHASE</div><b class="sxeState ${ex.antiChase.level==='CHASE'?'bad':ex.antiChase.level==='CAUTION'?'gold':'good'}">${ex.antiChase.level}</b><div class="sxeIntelText">${ex.antiChase.text}</div></div>
+    <div class="sxeIntel"><div class="sxeIntelTitle">INVALIDATION</div><b class="sxeState ${ex.invalidation.level==='INVALID'?'bad':ex.invalidation.level==='NEAR'?'gold':'good'}">${ex.invalidation.level}</b><div class="sxeIntelText">${ex.invalidation.text}</div></div>
+    <div class="sxeIntel"><div class="sxeIntelTitle">CONFLICT DETECTOR</div><b class="sxeState ${ex.conflict.level==='MAJOR CONFLICT'?'bad':ex.conflict.level==='MINOR CONFLICT'?'gold':'good'}">${ex.conflict.level}</b><div class="sxeIntelText">${ex.conflict.text}</div></div>
+    <div class="sxeIntel"><div class="sxeIntelTitle">ENTRY ZONE</div><b class="sxeState ${ex.entryZone.state==='LATE'||ex.entryZone.state==='WAIT-PULLBACK'?'gold':'good'}">${ex.entryZone.state}</b><div class="sxeIntelText">${ex.entryZone.text}</div></div>
+    <div class="sxeIntel sxeWide"><div class="sxeIntelTitle">DECISION QUALITY GATE</div><b class="sxeState ${ex.decision.state==='NO-TRADE'?'bad':ex.decision.state==='CAUTION'?'gold':'good'}">${ex.decision.state}</b><div class="sxeIntelText">${ex.decision.reasons.join(' · ')}</div></div>
+    <div class="sxeIntel sxeWide"><div class="sxeIntelTitle">HISTORICAL SIMILAR SETUP</div><div class="sxeIntelText">${ex.similarText}</div></div>
+  </div>
+  <div class="sxeFooter">Entry readiness: <b>${ex.readiness?.label||'WAIT'} ${ex.readiness?.score||0}%</b> · Quality <b>${ex.quality?.label||'WAIT'} ${ex.quality?.score||0}/100</b> · Penjelasan ini membaca data signal yang sama; tidak mengubah BUY/SELL.</div>`;
+}
+function getFinalSignal(){
+  const c=S.c.at(-1); if(!c)return {side:'WAIT',score:0,gap:0,strength:'LOW',reason:['Menunggu data candle'],final:true,readiness:{ready:false,score:0,label:'WAIT'}};
+  const t=getConfirmedSignal(); const ms=tfMillis(S.tf), live=Date.now()>=Number(c.t)&&Date.now()<Number(c.t)+ms;
+  const anchor=live&&S.c.length>1?S.c.at(-2):c;
+  const readiness=getEntryReadiness(t); const riskPlan=buildSmartRiskPlan(t); const quality=getSignalQuality(t,readiness,riskPlan); return {...t,final:true,targetTs:Number(anchor.t)+ms,anchorTs:Number(anchor.t),live,momentum:live?getRealtimeMomentum():null,readiness,riskPlan,quality};
+}
+function updateAITrend(){
+  const t=getFinalSignal();
+  const prev=AI_TREND.side; AI_TREND=t;
+  const el=$('aiSignal'); if(el){
+    el.textContent=t.side;
+    el.className='signal '+(t.side==='BUY'?'good':t.side==='SELL'?'bad':'wait');
+  }
+  const sc=$('aiScore'); if(sc)sc.textContent=`${t.score}/100 · ${t.strength} · ENTRY ${t.readiness?.label||'WAIT'} ${t.readiness?.score||0}% · ${signalQualityText(t.quality)}`;
+  const rs=$('aiReason'); if(rs)rs.innerHTML=t.reason.map(x=>`<div>• ${x}</div>`).join(''); const closed=S.c.slice(0,-1); const sr=t.sr||detectSR(closed.length?closed:S.c); SR_STATE=sr; const ss=$('srSupport'),rr=$('srResistance'),scx=$('srContext'),pb=$('predictBox'); if(ss)ss.textContent=sr.support?fmt(sr.support):'—'; if(rr)rr.textContent=sr.resistance?fmt(sr.resistance):'—'; if(scx)scx.textContent=`Context: ${sr.context||'—'} · Support ${sr.distanceSupport!=null?sr.distanceSupport.toFixed(2)+'%':'—'} · Resistance ${sr.distanceResistance!=null?sr.distanceResistance.toFixed(2)+'%':'—'}`; if(pb)pb.innerHTML=`Predictive: <b>${t.side}</b> · wick/body + momentum + S/R reaction`; renderSignalExplanation(t); renderMarketIntelligence(t); const li=$('learningInfo'); if(li){const l=t.learning;li.textContent=l?.hitRate!=null?`CANDLE LEARNING: ${Math.round(l.hitRate*100)}% historical hit · ${l.featureSamples} sample · adjustment ${l.adjustment>=0?'+':''}${l.adjustment} · model ${l.samples} labeled candles`:`CANDLE LEARNING: ${l?.samples||ADAPTIVE_INFO.samples||0} labeled candles · menunggu sample pola yang cukup`; } 
+  if(prev!==t.side && t.side!=='WAIT'){
+    const msg=`AI Trend: ${t.side} ${S.symbol} · score ${t.score}/100`;
+    if(AI_TREND.lastNotified!==msg){
+      AI_TREND.lastNotified=msg;
+      try{if('Notification' in window && Notification.permission==='granted')new Notification('Obsidian Futures',{body:msg})}catch{}
+    }
+  }
+  const lb=$('aiLong'),sb=$('aiShort');
+  updateEntryButtons();
+}
+function signalTime(ts){return new Date(ts||Date.now()).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})+' WIB'}
+function nextCandleTime(ts){const ms=tfMillis(S.tf);return new Date(Math.floor((ts+ms)/ms)*ms).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'})+' WIB'}
+function forecastClock(ts){
+  return new Date(ts).toLocaleTimeString('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit'}).replace(':','.');
+}
+function forecastLabel(ts){return `${forecastClock(ts)} WIB`;}
+function buildProjectionModel(c){

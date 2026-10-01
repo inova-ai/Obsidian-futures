@@ -1,6 +1,6 @@
 {
   "name": "obsidian-futures-v5-vercel",
-  "version": "5.41.4",
+  "version": "6.0.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node index.js",
-    "check": "node --check api/index.js && node --check app.js && node --check index.js && python3 -m py_compile patch.py"
+    "check": "node --check api/index.js && node --check app.js && node --check index.js"
   },
   "dependencies": {
     "express": "^5.1.0",

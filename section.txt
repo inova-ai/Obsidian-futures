@@ -1,0 +1,426 @@
+  const mtf=Number(f.mtfRatio||f.mtfAlignment||0);
+  const readiness=row?.readiness?.label||'WAIT';
+  return {side,regime,sr,momentum,body,mtf,readiness};
+}
+function strategyKey(row){
+  const c=strategyContext(row);
+  return `${c.side} · ${c.regime} · ${c.sr} · ${c.momentum>=65?'MOM+':c.momentum>=45?'MOM~':'MOM-'} · ${c.readiness}`;
+}
+function buildStrategyIntelligence(){
+  const rows=strategyIntelRows();
+  const groups=adaptiveGroupStats(rows,strategyKey).filter(x=>x.n>=4);
+  const ranked=[...groups].sort((a,b)=>(b.rate-a.rate)||(b.avgR??-999)-(a.avgR??-999));
+  const current=getFinalSignal?.()||{};
+  const active=strategyContext(current);
+  const matching=rows.filter(x=>{
+    const c=strategyContext(x);
+    return c.side===active.side && c.regime===active.regime && c.sr===active.sr && c.readiness===active.readiness;
+  });
+  const matchStats=evaluateAdaptiveThreshold(matching,-Infinity);
+  const sideStats=adaptiveGroupStats(rows,x=>x.side).filter(x=>x.n>=4);
+  const regimeStats=adaptiveGroupStats(rows,x=>strategyContext(x).regime).filter(x=>x.n>=4);
+  let status='NO MATCH';
+  if(active.side==='BUY'||active.side==='SELL'){
+    if(matching.length>=8) status=matchStats.rate>=.6?'SUPPORTED':matchStats.rate<=.4?'WEAK':'MIXED';
+    else status='LOW SAMPLE';
+  }
+  const edge=matchStats.rate==null?null:matchStats.rate-.5;
+  return {rows,groups:ranked.slice(0,8),weak:[...groups].sort((a,b)=>(a.rate-b.rate)||(a.avgR??999)-(b.avgR??999)).slice(0,5),active,matching,matchStats,sideStats,regimeStats,status,edge};
+}
+function researchRows(){
+  return SIGNALS.filter(x=>x.symbol===S.symbol&&['BUY','SELL'].includes(x.side)&&x.status==='CLOSED'&&(x.outcome==='HIT'||x.outcome==='MISS'))
+    .sort((a,b)=>Number(a.targetTs||a.ts)-Number(b.targetTs||b.ts));
+}
+function researchFeature(row){
+  const f=row?.featureSnapshot||{};
+  return {
+    score:Number(row.score||0),
+    momentum:Number(f.momentumScore||0),
+    body:Number(f.bodyPct||0),
+    mtf:Number(f.mtfRatio||f.mtfAlignment||0),
+    readiness:row?.readiness?.label||'WAIT',
+    regime:row?.marketRegime?.regime||row?.marketRegime?.label||'UNKNOWN',
+    side:row?.side||'UNKNOWN'
+  };
+}
+function researchMetrics(rows){
+  const rs=rows.map(x=>Number(x.realizedR)).filter(Number.isFinite);
+  const hit=rows.filter(x=>x.outcome==='HIT').length;
+  let eq=0,peak=0,maxDD=0,losing=0,maxLosing=0;
+  for(const r of rs){eq+=r; if(eq>peak)peak=eq; maxDD=Math.max(maxDD,peak-eq); if(r<0){losing++;maxLosing=Math.max(maxLosing,losing)}else losing=0;}
+  return {n:rows.length,hit,rate:rows.length?hit/rows.length:null,avgR:rs.length?rs.reduce((a,b)=>a+b,0)/rs.length:null,totalR:rs.length?rs.reduce((a,b)=>a+b,0):null,maxDD,maxLosing};
+}
+function buildResearchCandidate(rows, label, filterFn){
+  const selected=rows.filter(filterFn), cut=Math.floor(selected.length*.7);
+  const train=selected.slice(0,cut), test=selected.slice(cut);
+  return {label,full:researchMetrics(selected),train:researchMetrics(train),test:researchMetrics(test)};
+}
+function buildStrategyResearch(){
+  const rows=researchRows();
+  const currentScore=Math.max(0,Math.min(100,Number(AUTO_CONFIRM_SCORE)||65));
+  const candidates=[];
+  for(const threshold of [55,60,65,70,75,80]) candidates.push(buildResearchCandidate(rows,`Score ≥ ${threshold}`,x=>researchFeature(x).score>=threshold));
+  for(const threshold of [45,55,65]) candidates.push(buildResearchCandidate(rows,`Momentum ≥ ${threshold}`,x=>researchFeature(x).momentum>=threshold));
+  candidates.push(buildResearchCandidate(rows,'READY only',x=>researchFeature(x).readiness==='READY'));
+  candidates.push(buildResearchCandidate(rows,'Score ≥ 65 + Momentum ≥ 55',x=>{const f=researchFeature(x);return f.score>=65&&f.momentum>=55}));
+  candidates.push(buildResearchCandidate(rows,'Score ≥ 70 + Momentum ≥ 65',x=>{const f=researchFeature(x);return f.score>=70&&f.momentum>=65}));
+  const baseline={label:'ALL CLOSED',full:researchMetrics(rows),train:researchMetrics(rows.slice(0,Math.floor(rows.length*.7))),test:researchMetrics(rows.slice(Math.floor(rows.length*.7)))};
+  const viable=candidates.filter(c=>c.test.n>=8&&c.train.n>=8&&Number.isFinite(c.test.avgR)&&Number.isFinite(c.train.avgR));
+  const ranked=[...viable].sort((a,b)=>((b.test.avgR??-999)-(a.test.avgR??-999))||((b.test.rate??0)-(a.test.rate??0)));
+  const best=ranked[0]||null;
+  const baseTest=baseline.test;
+  let recommendation=null;
+  if(best&&baseTest.n>=8&&Number.isFinite(baseTest.avgR)){
+    const deltaR=best.test.avgR-baseTest.avgR;
+    const deltaRate=(best.test.rate??0)-(baseTest.rate??0);
+    const trainDelta=best.train.avgR-baseline.train.avgR;
+    const stable=deltaR>0&&trainDelta>0&&(best.test.rate??0)>=(baseTest.rate??0)-.03;
+    const confidence=best.test.n>=20&&best.train.n>=20&&deltaR>=.15&&stable?'HIGH':best.test.n>=12&&deltaR>=.08&&stable?'MEDIUM':'LOW';
+    if(confidence!=='LOW') recommendation={...best,deltaR,deltaRate,confidence};
+  }
+  const overfit=best?((best.test.avgR??-999)<(best.train.avgR??-999)-.35 || best.test.n<8 || best.train.n<8):true;
+  const learning=rows.length>=60&&baseline.test.n>=18?'HIGH':rows.length>=25&&baseline.test.n>=8?'MEDIUM':'LOW';
+  return {rows,baseline,candidates:ranked.slice(0,8),weak:[...viable].sort((a,b)=>(a.test.avgR??999)-(b.test.avgR??999)).slice(0,5),best,recommendation,overfit,learning,currentScore};
+}
+function fullHistoricalBacktest(){
+  const a=Array.isArray(S.c)?S.c:[];
+  const minScore=Math.max(0,Math.min(100,Number($('bscore')?.value||52)));
+  const minGap=Math.max(0,Math.min(100,Number($('bgap')?.value||9)));
+  const fee=Math.max(0,Number($('fee')?.value||0))/100;
+  const slip=Math.max(0,Number($('slip')?.value||0))/100;
+  const risk=Math.max(.05,Number($('brisk')?.value||1))/100;
+  const maxBars=Math.max(3,Math.min(100,Number($('riskBars')?.value||20)));
+  const rrMin=Math.max(1,Number($('rr')?.value||2));
+  if(a.length<150){$('fullHistoricalBacktest').innerHTML='<span class="bad">Minimal 150 candle diperlukan untuk Full Historical Backtest.</span>';return;}
+  const rows=[];
+  let equity=1,peak=1,maxDD=0,grossWin=0,grossLoss=0,wins=0,losses=0,timeout=0,ambiguous=0;
+  for(let i=60;i<a.length-1;i++){
+    const hist=a.slice(0,i+1), pred=adaptivePredictiveCandle(hist);
+    if(!['BUY','SELL'].includes(pred.side)||Number(pred.score||0)<minScore||Number(pred.gap||0)<minGap)continue;
+    const plan=buildSmartRiskPlan({...pred,closed:hist});
+    if(!plan?.valid||Number(plan.rr1||0)<rrMin)continue;
+    const entryBar=a[i+1];
+    const rawEntry=Number(entryBar.o);
+    if(!Number.isFinite(rawEntry)||rawEntry<=0)continue;
+    const entry=pred.side==='BUY'?rawEntry*(1+slip):rawEntry*(1-slip);
+    const stop=Number(plan.sl), tp=Number(plan.tp2||plan.tp1);
+    if(!Number.isFinite(stop)||!Number.isFinite(tp))continue;
+    let result='TIMEOUT',exit=Number(entryBar.c),exitIndex=Math.min(a.length-1,i+maxBars),both=false;
+    for(let j=i+1;j<=Math.min(a.length-1,i+maxBars);j++){
+      const c=a[j],hi=Number(c.h),lo=Number(c.l);
+      const hitSL=pred.side==='BUY'?lo<=stop:hi>=stop;
+      const hitTP=pred.side==='BUY'?hi>=tp:lo<=tp;
+      if(hitSL&&hitTP){result='SL';exit=stop;exitIndex=j;both=true;break;}
+      if(hitTP){result='TP';exit=tp;exitIndex=j;break;}
+      if(hitSL){result='SL';exit=stop;exitIndex=j;break;}
+      exit=Number(c.c);exitIndex=j;
+    }
+    if(result==='TIMEOUT')timeout++;
+    if(both)ambiguous++;
+    const gross=pred.side==='BUY'?(exit-entry)/entry:(entry-exit)/entry;
+    const riskUnit=Math.abs(entry-stop)/entry;
+    if(!(riskUnit>0))continue;
+    const realizedR=gross/riskUnit;
+    const costs=fee*2+slip*2;
+    const netR=(gross-costs)/riskUnit;
+    const pnlPct=netR*risk*100;
+    if(netR>=0){wins++;grossWin+=netR}else{losses++;grossLoss+=Math.abs(netR)}
+    equity*=Math.max(.05,1+netR*risk); peak=Math.max(peak,equity); maxDD=Math.max(maxDD,(peak-equity)/peak);
+    rows.push({i,exitIndex,side:pred.side,score:Number(pred.score||0),result,realizedR:netR,pnlPct});
+  }
+  const cut=Math.floor(rows.length*.7),train=rows.slice(0,cut),oos=rows.slice(cut);
+  const stat=(rs)=>{const n=rs.length,w=rs.filter(x=>x.result==='TP').length,rr=rs.map(x=>x.realizedR);const avg=rr.length?rr.reduce((a,b)=>a+b,0)/rr.length:null;return {n,w,rate:n?w/n:null,avg,total:rr.reduce((a,b)=>a+b,0)};};
+  const st=stat(rows),tr=stat(train),oo=stat(oos),pf=grossLoss?grossWin/grossLoss:null;
+  const oosEq=oos.reduce((e,x)=>e*Math.max(.05,1+x.realizedR*risk),1),oosRet=(oosEq-1)*100;
+  const stable=tr.avg!=null&&oo.avg!=null&&tr.avg>0&&oo.avg>0;
+  const confidence=rows.length>=60&&oos.length>=18&&stable?'HIGH':rows.length>=30&&oos.length>=10?'MEDIUM':'LOW';
+  const tone=stable?'good':(oo.avg!=null&&oo.avg>0?'gold':'bad');
+  $('fullHistoricalBacktest').innerHTML=`<div class="ljHead"><div><span class="label">V5.58 FULL HISTORICAL BACKTEST</span><b>Candle-by-candle · chronological · no hindsight</b></div><span class="sxeBadge ${tone}">${stable?'OOS POSITIVE':'CAUTION'} · ${confidence}</span></div>
+  <div class="ljSummary"><div><small>SETUPS</small><b>${st.n}</b></div><div><small>HIT TP</small><b>${st.rate==null?'—':Math.round(st.rate*100)+'%'}</b></div><div><small>AVG R</small><b>${st.avg==null?'—':st.avg.toFixed(2)+'R'}</b></div><div><small>MAX DD</small><b>${(maxDD*100).toFixed(1)}%</b></div></div>
+  <div class="contextRows"><div><span>Full simulated equity</span><b>${((equity-1)*100).toFixed(2)}%</b></div><div><span>Profit Factor</span><b>${pf==null?'—':pf.toFixed(2)}</b></div><div><span>Train 70% Avg R</span><b>${tr.avg==null?'—':tr.avg.toFixed(2)+'R'} · ${tr.n} setups</b></div><div><span>OOS 30% Avg R</span><b>${oo.avg==null?'—':oo.avg.toFixed(2)+'R'} · ${oo.n} setups · ${oosRet.toFixed(2)}%</b></div><div><span>Timeout / ambiguous</span><b>${timeout} / ${ambiguous}</b></div></div>
+  <div class="ljFeedback">${stable?'Train dan OOS sama-sama positif pada simulasi historis ini. Itu menunjukkan konsistensi pada sample yang tersedia, bukan jaminan bahwa edge akan bertahan di pasar live.':'Hasil belum menunjukkan konsistensi OOS yang cukup. Sistem tidak akan menyimpulkan strategi ini menguntungkan hanya dari full-sample result.'}</div>
+  <div class="note">Entry = open candle setelah signal. SL/TP = Smart Risk Plan yang tersedia pada saat signal. Jika SL dan TP tersentuh dalam candle yang sama, simulasi memakai aturan konservatif <b>SL-first</b>. Fee, slippage, risk %, dan max holding bars mengikuti input Uji Strategi. Funding belum dimodelkan per candle karena data funding historis tidak tersedia di chart OHLC.</div>`;
+}
+
+
+function strategyOptimizationSim(rows, params, risk, fee, slip){
+  const cut=Math.floor(rows.length*.7), out=[];
+  const run=(arr)=>{
+    let eq=1,peak=1,maxDD=0,w=0,l=0,gw=0,gl=0;
+    for(const x of arr){
+      if(x.score<params.score||x.gap<params.gap)continue;
+      const entry=x.entry, atr=x.atr;
+      if(!(entry>0&&atr>0))continue;
+      const stopDist=atr*params.atr;
+      const tpDist=stopDist*params.rr;
+      let result='TIMEOUT',exit=x.close,both=false;
+      for(let j=0;j<x.future.length&&j<params.bars;j++){
+        const c=x.future[j],hi=Number(c.h),lo=Number(c.l);
+        const sl=x.side==='BUY'?lo<=entry-stopDist:hi>=entry+stopDist;
+        const tp=x.side==='BUY'?hi>=entry+tpDist:lo<=entry-tpDist;
+        if(sl&&tp){result='SL';exit=x.side==='BUY'?entry-stopDist:entry+stopDist;both=true;break}
+        if(tp){result='TP';exit=x.side==='BUY'?entry+tpDist:entry-tpDist;break}
+        if(sl){result='SL';exit=x.side==='BUY'?entry-stopDist:entry+stopDist;break}
+        exit=Number(c.c)
+      }
+      const gross=x.side==='BUY'?(exit-entry)/entry:(entry-exit)/entry;
+      const netR=(gross-(fee*2+slip*2))/Math.max(1e-9,stopDist/entry);
+      eq*=Math.max(.05,1+netR*risk); peak=Math.max(peak,eq); maxDD=Math.max(maxDD,(peak-eq)/peak);
+      if(netR>=0){w++;gw+=netR}else{l++;gl+=Math.abs(netR)}
+      out.push({result,netR,both});
+    }
+    const n=w+l, avg=n?out.filter(Boolean).reduce((a,z)=>a+z.netR,0)/Math.max(1,out.length):null;
+    return {n,win:w,loss:l,avgR:avg,hit:n?w/n:null,maxDD,pf:gl?gw/gl:null,returnPct:(eq-1)*100};
+  };
+  const train=run(rows.slice(0,cut)); const before=out.length; const oosOut=[];
+  // Re-run OOS separately so statistics are independent.
+  out.length=0; const oos=run(rows.slice(cut));
+  return {train,oos};
+}
+function optimizeStrategyV559(){
+  const host=$('optimizationLab'); if(!host)return;
+  const a=Array.isArray(S.c)?S.c:[];
+  const fee=Math.max(0,Number($('fee')?.value||0))/100, slip=Math.max(0,Number($('slip')?.value||0))/100, risk=Math.max(.05,Number($('brisk')?.value||1))/100;
+  if(a.length<220){host.innerHTML='<div class="note bad">Minimal 220 candle diperlukan untuk Optimization Lab.</div>';return;}
+  const raw=[];
+  for(let i=70;i<a.length-1;i++){
+    const hist=a.slice(0,i+1), pred=adaptivePredictiveCandle(hist);
+    if(!['BUY','SELL'].includes(pred.side))continue;
+    const atr=Number(pred.atr||ATR(hist).at(-1)||0), entry=Number(a[i+1]?.o||0);
+    if(!(atr>0&&entry>0))continue;
+    raw.push({i,side:pred.side,score:Number(pred.score||0),gap:Number(pred.gap||0),atr,entry,close:entry,future:a.slice(i+1),regime:pred.regime||'UNKNOWN'});
+  }
+  const candidates=[];
+  const scores=[48,52,56,60,64,68,72], gaps=[4,8,12], atrs=[0.8,1.0,1.25,1.5,1.75,2.0], rrs=[1.25,1.5,1.75,2,2.5,3], bars=[8,12,20,30];
+  for(const score of scores)for(const gap of gaps)for(const atr of atrs)for(const rr of rrs)for(const bar of bars){
+    const filtered=raw.filter(x=>x.score>=score&&x.gap>=gap); if(filtered.length<24)continue;
+    const cut=Math.floor(filtered.length*.7), tr=filtered.slice(0,cut), oo=filtered.slice(cut);
+    const sim=(arr)=>{let eq=1,peak=1,dd=0,w=0,l=0,gw=0,gl=0,rs=[];for(const x of arr){let result='TIMEOUT',exit=x.close,dist=x.atr*atr;for(let j=0;j<x.future.length&&j<bar;j++){const c=x.future[j],hi=+c.h,lo=+c.l,sl=x.side==='BUY'?lo<=x.entry-dist:hi>=x.entry+dist,tp=x.side==='BUY'?hi>=x.entry+dist*rr:lo<=x.entry-dist*rr;if(sl&&tp){result='SL';exit=x.side==='BUY'?x.entry-dist:x.entry+dist;break}if(tp){result='TP';exit=x.side==='BUY'?x.entry+dist*rr:x.entry-dist*rr;break}if(sl){result='SL';exit=x.side==='BUY'?x.entry-dist:x.entry+dist;break}exit=+c.c}const gross=x.side==='BUY'?(exit-x.entry)/x.entry:(x.entry-exit)/x.entry, netR=(gross-(fee*2+slip*2))/Math.max(1e-9,dist/x.entry);rs.push(netR);if(netR>=0){w++;gw+=netR}else{l++;gl+=-netR}eq*=Math.max(.05,1+netR*risk);peak=Math.max(peak,eq);dd=Math.max(dd,(peak-eq)/peak)}return{n:rs.length,avgR:rs.length?rs.reduce((a,b)=>a+b,0)/rs.length:null,hit:rs.length?w/rs.length:null,maxDD:dd,pf:gl?gw/gl:null,ret:(eq-1)*100};};
+    const train=sim(tr),oos=sim(oo); if(oos.n<10||train.n<14||train.avgR==null||oos.avgR==null)continue;
+    const stability=Math.min(train.avgR,oos.avgR), scoreVal=oos.avgR-(oos.maxDD*.35)+(Math.min(oos.pf||0,3)*.03);
+    candidates.push({params:{score,gap,atr,rr,bar},train,oos,stability,scoreVal});
+  }
+  candidates.sort((x,y)=>y.scoreVal-x.scoreVal);
+  const best=candidates[0], baseline=candidates.find(x=>x.params.score===52&&x.params.gap===9&&x.params.atr===1.5&&x.params.rr===2&&x.params.bar===20)||null;
+  const stable=best&&best.train.avgR>0&&best.oos.avgR>0&&best.oos.maxDD<Math.max(.35,best.train.maxDD*1.5);
+  const improvement=best&&baseline&&baseline.oos.avgR!=null?best.oos.avgR-baseline.oos.avgR:null;
+  const confidence=best&&best.oos.n>=30&&stable?'HIGH':best&&best.oos.n>=15?'MEDIUM':'LOW';
+  const guard=best&&!stable?'HOLD':best&&best.oos.avgR<=0?'HOLD':best&&best.train.avgR>0&&best.oos.avgR>0?'PASS':'HOLD';
+  const top=candidates.slice(0,8).map(x=>`<div class="ljRow"><span>S${x.params.score} · G${x.params.gap} · ATR ${x.params.atr} · RR ${x.params.rr} · ${x.params.bar}b</span><b>${x.oos.avgR.toFixed(2)}R</b><small>OOS ${x.oos.n} · Hit ${Math.round(x.oos.hit*100)}% · DD ${(x.oos.maxDD*100).toFixed(1)}%</small></div>`).join('')||'<div class="note">Belum ada kandidat yang memenuhi minimum sample.</div>';
+  host.innerHTML=`<div class="ljHead"><div><span class="label">V5.59 STRATEGY OPTIMIZATION LAB</span><b>Parameter search · train/OOS · no automatic apply</b></div><span class="sxeBadge ${guard==='PASS'?'good':guard==='HOLD'?'bad':'gold'}">${guard} · ${confidence}</span></div>
+  <div class="ljSummary"><div><small>CANDIDATES</small><b>${candidates.length}</b></div><div><small>BEST OOS R</small><b>${best?best.oos.avgR.toFixed(2)+'R':'—'}</b></div><div><small>OOS HIT</small><b>${best?Math.round(best.oos.hit*100)+'%':'—'}</b></div><div><small>OOS DD</small><b>${best?(best.oos.maxDD*100).toFixed(1)+'%':'—'}</b></div></div>
+  <div class="adaptiveGuard"><b>OPTIMIZATION GUARD:</b> hanya kandidat dengan sample minimum, Train/OOS kronologis, dan OOS positif yang dapat dianggap stabil. Tidak ada parameter live yang diubah otomatis.</div>
+  <div class="contextRows"><div><span>Best candidate</span><b>${best?`Score ${best.params.score} · Gap ${best.params.gap} · ATR ${best.params.atr} · RR ${best.params.rr} · ${best.params.bar} bars`:'—'}</b></div><div><span>Train Avg R</span><b>${best?best.train.avgR.toFixed(2)+'R · '+best.train.n+' setups':'—'}</b></div><div><span>OOS Avg R</span><b>${best?best.oos.avgR.toFixed(2)+'R · '+best.oos.n+' setups':'—'}</b></div><div><span>vs baseline OOS</span><b>${improvement==null?'—':(improvement>=0?'+':'')+improvement.toFixed(2)+'R'}</b></div></div>
+  <div class="ljFeedback">${best&&guard==='PASS'?`Kandidat historis teratas lolos guard dasar. Ini bukan jaminan edge masa depan dan tetap perlu diuji ulang pada data baru.`:'Belum ada kandidat yang cukup stabil untuk direkomendasikan. Sistem sengaja menahan rekomendasi daripada memilih parameter dari hasil yang belum kuat.'}</div>
+  <div class="sxeIntelTitle">TOP CANDIDATES</div>${top}`;
+}
+
+function walkForwardV560(){
+  const host=$('walkForwardV560'); if(!host)return;
+  const a=Array.isArray(S.c)?S.c:[];
+  const fee=Math.max(0,Number($('fee')?.value||0))/100, slip=Math.max(0,Number($('slip')?.value||0))/100, risk=Math.max(.05,Number($('brisk')?.value||1))/100;
+  if(a.length<320){host.innerHTML='<div class="note bad">Minimal 320 candle diperlukan untuk Walk-Forward Validation 2.0.</div>';return;}
+  const raw=[];
+  for(let i=70;i<a.length-1;i++){
+    const hist=a.slice(0,i+1), pred=adaptivePredictiveCandle(hist);
+    if(!['BUY','SELL'].includes(pred.side))continue;
+    const atr=Number(pred.atr||ATR(hist).at(-1)||0), entry=Number(a[i+1]?.o||0);
+    if(!(atr>0&&entry>0))continue;
+    raw.push({i,side:pred.side,score:Number(pred.score||0),gap:Number(pred.gap||0),atr,entry,close:entry,future:a.slice(i+1),regime:pred.regime||'UNKNOWN'});
+  }
+  if(raw.length<100){host.innerHTML='<div class="note bad">Signal historis yang dapat diuji belum cukup. Minimal 100 setup.</div>';return;}
+  const configs=[];
+  const scores=[52,60,68], gaps=[4,8,12], atrs=[1.0,1.5,2.0], rrs=[1.5,2,2.5], bars=[12,20,30];
+  for(const score of scores)for(const gap of gaps)for(const atr of atrs)for(const rr of rrs)for(const bar of bars) configs.push({score,gap,atr,rr,bar});
+  const sim=(arr,c)=>{
+    let eq=1,peak=1,maxDD=0,w=0,l=0,gw=0,gl=0; const rs=[];
+    for(const x of arr){
+      let result='TIMEOUT',exit=x.close,dist=x.atr*c.atr;
+      for(let j=0;j<x.future.length&&j<c.bar;j++){
+        const z=x.future[j],hi=+z.h,lo=+z.l;
+        const sl=x.side==='BUY'?lo<=x.entry-dist:hi>=x.entry+dist;
+        const tp=x.side==='BUY'?hi>=x.entry+dist*c.rr:lo<=x.entry-dist*c.rr;
+        if(sl&&tp){result='SL';exit=x.side==='BUY'?x.entry-dist:x.entry+dist;break}
+        if(tp){result='TP';exit=x.side==='BUY'?x.entry+dist*c.rr:x.entry-dist*c.rr;break}
+        if(sl){result='SL';exit=x.side==='BUY'?x.entry-dist:x.entry+dist;break}
+        exit=+z.c;
+      }
+      const gross=x.side==='BUY'?(exit-x.entry)/x.entry:(x.entry-exit)/x.entry;
+      const netR=(gross-(fee*2+slip*2))/Math.max(1e-9,dist/x.entry);
+      rs.push(netR); if(netR>=0){w++;gw+=netR}else{l++;gl-=netR}
+      eq*=Math.max(.05,1+netR*risk); peak=Math.max(peak,eq); maxDD=Math.max(maxDD,(peak-eq)/peak);
+    }
+    return {n:rs.length,avgR:rs.length?rs.reduce((x,y)=>x+y,0)/rs.length:0,hit:rs.length?w/rs.length:0,pf:gl?gw/gl:null,maxDD,ret:(eq-1)*100};
+  };
+  const windows=[];
+  const windowCount=5, trainSize=Math.max(45,Math.floor(raw.length*.25)), testSize=Math.max(20,Math.floor(raw.length*.12));
+  for(let k=0;k<windowCount;k++){
+    const start=k*testSize, train=raw.slice(start,start+trainSize), test=raw.slice(start+trainSize,start+trainSize+testSize);
+    if(train.length<45||test.length<20)break;
+    windows.push({train,test});
+  }
+  const candidates=configs.map(c=>{
+    const folds=windows.map(w=>({tr:sim(w.train,c),te:sim(w.test,c)}));
+    const oos=folds.map(f=>f.te).filter(x=>x.n); const tr=folds.map(f=>f.tr).filter(x=>x.n);
+    const oosAvg=oos.length?oos.reduce((x,y)=>x+y.avgR,0)/oos.length:0;
+    const trainAvg=tr.length?tr.reduce((x,y)=>x+y.avgR,0)/tr.length:0;
+    const positive=oos.filter(x=>x.avgR>0).length;
+    const consistency=oos.length?positive/oos.length:0;
+    const worstDD=oos.length?Math.max(...oos.map(x=>x.maxDD)):1;
+    const totalN=oos.reduce((x,y)=>x+y.n,0);
+    const scoreVal=oosAvg-(worstDD*.35)+(consistency*.05);
+    return {c,folds,oosAvg,trainAvg,consistency,worstDD,totalN,scoreVal};
+  }).filter(x=>x.totalN>=60);
+  candidates.sort((x,y)=>y.scoreVal-x.scoreVal);
+  const top=candidates[0];
+  const stable=!!top && top.oosAvg>0 && top.trainAvg>0 && top.consistency>=.6 && top.worstDD<.35;
+  const confidence=top&&top.totalN>=120&&top.consistency>=.8&&stable?'HIGH':top&&top.totalN>=80&&top.consistency>=.6?'MEDIUM':'LOW';
+  const guard=top&&stable?'PASS':'HOLD';
+  const foldRows=top?top.folds.map((f,i)=>`<div class="ljRow"><span>Fold ${i+1}</span><b class="${f.te.avgR>0?'good':'bad'}">OOS ${f.te.avgR.toFixed(2)}R</b><small>Train ${f.tr.avgR.toFixed(2)}R · ${f.te.n} setups · Hit ${Math.round(f.te.hit*100)}% · DD ${(f.te.maxDD*100).toFixed(1)}%</small></div>`).join(''):'<div class="note">Belum ada kandidat yang memenuhi minimum sample.</div>';
+  const topRows=candidates.slice(0,6).map(x=>`<div class="ljRow"><span>S${x.c.score} · G${x.c.gap} · ATR ${x.c.atr} · RR ${x.c.rr} · ${x.c.bar}b</span><b>${x.oosAvg.toFixed(2)}R</b><small>${Math.round(x.consistency*100)}% folds positive · DD ${(x.worstDD*100).toFixed(1)}% · ${x.totalN} OOS</small></div>`).join('');
+  host.innerHTML=`<div class="ljHead"><div><span class="label">V5.60 WALK-FORWARD VALIDATION 2.0</span><b>5 chronological OOS windows · no automatic apply</b></div><span class="sxeBadge ${guard==='PASS'?'good':'bad'}">${guard} · ${confidence}</span></div>
+  <div class="ljSummary"><div><small>RAW SETUPS</small><b>${raw.length}</b></div><div><small>FOLDS</small><b>${windows.length}</b></div><div><small>BEST OOS AVG</small><b>${top?top.oosAvg.toFixed(2)+'R':'—'}</b></div><div><small>FOLDS POSITIVE</small><b>${top?Math.round(top.consistency*100)+'%':'—'}</b></div></div>
+  <div class="adaptiveGuard"><b>WALK-FORWARD GUARD:</b> kandidat harus bertahan pada beberapa periode OOS. Satu periode bagus tidak cukup untuk dianggap stabil.</div>
+  <div class="contextRows"><div><span>Candidate</span><b>${top?`Score ${top.c.score} · Gap ${top.c.gap} · ATR ${top.c.atr} · RR ${top.c.rr} · ${top.c.bar} bars`:'—'}</b></div><div><span>Train average</span><b>${top?top.trainAvg.toFixed(2)+'R':'—'}</b></div><div><span>OOS average</span><b>${top?top.oosAvg.toFixed(2)+'R':'—'}</b></div><div><span>Worst OOS DD</span><b>${top?(top.worstDD*100).toFixed(1)+'%':'—'}</b></div></div>
+  <div class="ljGrid"><div><div class="sxeIntelTitle">FOLD RESULTS</div>${foldRows}</div><div><div class="sxeIntelTitle">TOP STABLE CANDIDATES</div>${topRows||'<div class="note">—</div>'}</div></div>
+  <div class="ljFeedback">${guard==='PASS'?'Kandidat teratas bertahan pada mayoritas window OOS dan melewati guard dasar. Ini tetap bukti historis, bukan jaminan profit masa depan.':'Validation menahan rekomendasi karena konsistensi OOS, sample, atau drawdown belum cukup kuat. Jangan menaikkan risiko hanya karena satu periode terlihat bagus.'}</div>`;
+}
+
+function renderStrategyResearch(){
+  const host=$('strategyResearch'); if(!host)return;
+  const r=buildStrategyResearch(), b=r.baseline, rec=r.recommendation;
+  const badge=r.learning==='HIGH'?'good':r.learning==='MEDIUM'?'gold':'bad';
+  const rows=r.candidates.map(x=>`<div class="ljRow"><span>${x.label}</span><b>${x.test.avgR==null?'—':x.test.avgR.toFixed(2)+'R'}</b><small>OOS ${x.test.n} · ${x.test.rate==null?'—':Math.round(x.test.rate*100)+'%'} · Train ${x.train.avgR==null?'—':x.train.avgR.toFixed(2)+'R'}</small></div>`).join('')||'<div class="note">Belum cukup closed signal untuk penelitian.</div>';
+  const weak=r.weak.map(x=>`<div class="ljRow"><span>${x.label}</span><b class="bad">${x.test.avgR==null?'—':x.test.avgR.toFixed(2)+'R'}</b><small>OOS ${x.test.n} · DD ${x.test.maxDD.toFixed(2)}R</small></div>`).join('')||'<div class="note">—</div>';
+  const recText=rec?`Kandidat <b>${rec.label}</b> memiliki OOS ${rec.test.avgR.toFixed(2)}R vs baseline ${b.test.avgR==null?'—':b.test.avgR.toFixed(2)+'R'}, dengan confidence ${rec.confidence}. Ini hasil penelitian historis, bukan jaminan hasil berikutnya.`:'Belum ada kandidat yang memenuhi syarat untuk rekomendasi. Sistem sengaja menahan rekomendasi jika sample, OOS, atau stabilitas belum cukup.';
+  host.innerHTML=`<div class="ljHead"><div><span class="label">V5.57 STRATEGY RESEARCH LAB</span><b>Walk-forward research · no hindsight</b></div><span class="sxeBadge ${badge}">${r.learning} DATA CONFIDENCE</span></div>
+  <div class="ljSummary"><div><small>CLOSED</small><b>${r.rows.length}</b></div><div><small>BASE OOS R</small><b>${b.test.avgR==null?'—':b.test.avgR.toFixed(2)+'R'}</b></div><div><small>BASE HIT</small><b>${b.test.rate==null?'—':Math.round(b.test.rate*100)+'%'}</b></div><div><small>OVERFIT GUARD</small><b class="${r.overfit?'bad':'good'}">${r.overfit?'HOLD':'PASS'}</b></div></div>
+  <div class="adaptiveGuard"><b>RESEARCH:</b> Data dibagi kronologis 70% train / 30% out-of-sample. Kandidat hanya dibandingkan setelah minimum sample terpenuhi. Tidak ada parameter live yang diubah otomatis.</div>
+  <div class="ljFeedback">${recText}</div>
+  <div class="ljGrid"><div><div class="sxeIntelTitle">OOS CANDIDATES</div>${rows}</div><div><div class="sxeIntelTitle">WEAK / UNSTABLE CANDIDATES</div>${weak}</div></div>
+  <div class="note" style="margin-top:8px">Research Lab menggunakan outcome signal yang sudah tercatat dan realized R yang tersedia. Ia bukan backtest candle-level dan tidak membuktikan profit masa depan.</div>`;
+}
+
+function renderStrategyIntelligence(){
+  const host=$('strategyIntelligence'); if(!host)return;
+  const a=buildStrategyIntelligence(), m=a.matchStats;
+  const active=a.active;
+  const statusClass=a.status==='SUPPORTED'?'good':a.status==='MIXED'?'gold':'bad';
+  const top=a.groups.map(x=>`<div class="ljRow"><span>${x.key}</span><b>${Math.round(x.rate*100)}%</b><small>${x.n} sample · ${adaptiveFormatR(x.avgR)}</small></div>`).join('')||'<div class="note">Belum cukup pola dengan minimal 4 sample.</div>';
+  const weak=a.weak.map(x=>`<div class="ljRow"><span>${x.key}</span><b class="bad">${Math.round(x.rate*100)}%</b><small>${x.n} sample · ${adaptiveFormatR(x.avgR)}</small></div>`).join('')||'<div class="note">Belum ada pola lemah yang cukup sample.</div>';
+  const side=a.sideStats.map(x=>`<div class="ljRow"><span>${x.key}</span><b>${Math.round(x.rate*100)}%</b><small>${x.n} sample · ${adaptiveFormatR(x.avgR)}</small></div>`).join('')||'<div class="note">—</div>';
+  const regime=a.regimeStats.map(x=>`<div class="ljRow"><span>${x.key}</span><b>${Math.round(x.rate*100)}%</b><small>${x.n} sample · ${adaptiveFormatR(x.avgR)}</small></div>`).join('')||'<div class="note">—</div>';
+  host.innerHTML=`<div class="ljHead"><div><span class="label">V5.50 STRATEGY INTELLIGENCE</span><b>Setup aktif vs histori yang mirip</b></div><span class="sxeBadge ${statusClass}">${a.status}</span></div>
+  <div class="ljSummary"><div><small>ACTIVE</small><b>${active.side||'WAIT'}</b></div><div><small>REGIME</small><b>${active.regime}</b></div><div><small>MATCH SAMPLE</small><b>${a.matching.length}</b></div><div><small>HIST HIT</small><b>${m.n?Math.round(m.rate*100)+'%':'—'}</b></div></div>
+  <div class="adaptiveGuard"><b>SETUP:</b> ${active.side} · ${active.regime} · ${active.sr} · ${active.readiness} · Momentum ${active.momentum}. ${a.status==='SUPPORTED'?'Histori yang mirip menunjukkan dukungan, dengan catatan sample tetap terbatas pada kondisi yang tersedia.':a.status==='WEAK'?'Histori yang mirip menunjukkan hasil kurang konsisten; jangan menganggap pola ini memiliki edge yang tetap.':a.status==='MIXED'?'Hasil histori campuran; tidak ada edge yang cukup jelas dari sample ini.':'Belum cukup histori yang benar-benar mirip untuk menarik kesimpulan.'}</div>
+  <div class="ljGrid"><div><div class="sxeIntelTitle">PATTERN PERFORMANCE</div>${top}</div><div><div class="sxeIntelTitle">PATTERN TO WATCH</div>${weak}</div></div>
+  <div class="ljGrid"><div><div class="sxeIntelTitle">BY SIDE</div>${side}</div><div><div class="sxeIntelTitle">BY MARKET REGIME</div>${regime}</div></div>
+  <div class="note" style="margin-top:8px">V5.50 adalah lapisan analitik. Status SUPPORTED/WEAK/MIXED bukan prediksi dan tidak mengubah signal BUY/SELL, leverage, SL/TP, atau AUTO TRADE secara otomatis.</div>`;
+}
+
+function renderSignalReplay(){
+  const host=$('signalReplay'); if(!host)return;
+  const rows=getReplayRows();
+  if(!rows.length){host.innerHTML='<div class="ljHead"><div><span class="label">V5.56 REPLAY LAB</span><b>Belum ada closed signal</b></div></div><div class="note">Setelah signal selesai, snapshot candle historis akan tersedia untuk replay tanpa hindsight.</div>';return;}
+  const selectedKey=$('replaySelect')?.value||rows[0].key;
+  const row=rows.find(x=>x.key===selectedKey)||rows[0];
+  const oldReveal=Number($('replayReveal')?.value||0);
+  const ctx=replayCandleContext(row,oldReveal);
+  const f=row.featureSnapshot||{};
+  const sideClass=row.side==='BUY'?'replayBuy':'replaySell';
+  const fmtC=c=>c?`${fmtIDR(Number(c.o))} → ${fmtIDR(Number(c.c))} · H ${fmtIDR(Number(c.h))} · L ${fmtIDR(Number(c.l))}`:'—';
+  const futureTotal=Number(ctx.futureTotal||0);
+  const reveal=Math.min(oldReveal,futureTotal);
+  const steps=[['T-2','BEFORE',ctx.before.at(-2)],['T-1','PRE-SIGNAL',ctx.before.at(-1)],['T0','SIGNAL',ctx.signal],...ctx.after.slice(0,3).map((c,i)=>[`T+${i+1}`,'REVEAL',c])];
+  const timeline=steps.map(([lab,name,c])=>`<div class="replayStep"><b>${lab} · ${name}</b><small>${c?fmtC(c):'Hidden'}</small></div>`).join('');
+  const options=rows.slice(0,40).map(x=>`<option value="${String(x.key).replace(/"/g,'&quot;')}" ${x.key===row.key?'selected':''}>${signalTime(x.targetTs||x.ts)} · ${x.side} · ${x.outcome||'—'} · ${Number(x.score||0)}/100</option>`).join('');
+  const mtf=Number(f.mtfTotal)>0?`${f.mtfAligned}/${f.mtfTotal}`:'—';
+  const grade=replayGrade(row,reveal);
+  const blind=reveal===0;
+  host.innerHTML=`<div class="ljHead"><div><span class="label">V5.56 REPLAY LAB</span><b>Candle-by-candle · ${blind?'BLIND MODE':'REVEALED '+reveal+'/'+futureTotal}</b></div><span class="sxeBadge ${blind?'gold':row.outcome==='HIT'?'good':'bad'}">${blind?'HINDSIGHT OFF':row.outcome||'CLOSED'}</span></div>
+  <select id="replaySelect" class="replaySelect">${options}</select>
+  <div class="replayGrid"><div class="replayCard"><small>SIGNAL</small><b class="${sideClass}">${row.side} · ${Number(row.score||0)}/100</b></div><div class="replayCard"><small>REALIZED R</small><b>${Number.isFinite(Number(row.realizedR))?Number(row.realizedR).toFixed(2)+'R':'—'}</b></div><div class="replayCard"><small>MTF</small><b>${mtf}</b></div><div class="replayCard"><small>REPLAY GRADE</small><b>${grade.grade}</b></div></div>
+  <div class="replayControls"><label><small>REVEAL CANDLE SETELAH SIGNAL</small><input id="replayReveal" type="range" min="0" max="${futureTotal}" value="${reveal}"><span id="replayRevealLabel">${reveal}/${futureTotal}</span></label><button class="btn" id="replayReset">RESET BLIND</button><button class="btn" id="replayRevealNext" ${reveal>=futureTotal?'disabled':''}>+1 CANDLE</button></div>
+  <div class="sxeIntelTitle" style="margin-top:10px">REPLAY TIMELINE</div><div class="replayTimeline">${timeline}</div>
+  <div class="replayInsight"><b>Blind checkpoint:</b> Saat T0, future candle disembunyikan. Snapshot signal: Body ${Number(f.bodyPct||0).toFixed(1)}% · Upper Wick ${Number(f.upperWickPct||0).toFixed(1)}% · Lower Wick ${Number(f.lowerWickPct||0).toFixed(1)}% · Momentum ${Number(f.momentumScore||0).toFixed(0)} · S/R ${f.context||row.context||'—'}.</div>
+  <div class="replayInsight"><b>Audit:</b> ${grade.detail} ${ctx.source==='live-fallback'?' Signal lama tidak memiliki snapshot candle; replay menggunakan data candle yang tersedia saat ini dan diberi label fallback.':''}</div>
+  <div class="note">Replay Lab adalah alat evaluasi. Grade bukan prediksi profit dan tidak mengubah signal, leverage, SL/TP, atau AUTO TRADE.</div>`;
+  const sel=$('replaySelect'); if(sel)sel.addEventListener('change',()=>renderSignalReplay());
+  const slider=$('replayReveal'); if(slider)slider.addEventListener('input',()=>renderSignalReplay());
+  const reset=$('replayReset'); if(reset)reset.addEventListener('click',()=>{renderReplayWithReveal(0)});
+  const next=$('replayRevealNext'); if(next)next.addEventListener('click',()=>{renderReplayWithReveal(reveal+1)});
+}
+function renderReplayWithReveal(value){
+  const sel=$('replaySelect'); const key=sel?.value;
+  renderSignalReplay();
+  const slider=$('replayReveal'); if(slider){slider.value=String(Math.max(0,Number(value)||0)); slider.dispatchEvent(new Event('input'));}
+  if(key&&$('replaySelect'))$('replaySelect').value=key;
+}
+function lifecycle2Tone(state){
+  return ['INVALIDATED','SL / MISS'].includes(state)?'bad':(['TP1 REACHED','TP / HIT','TP2 REACHED'].includes(state)?'good':'gold');
+}
+function lifecycle2State(pred){
+  if(!pred||!['BUY','SELL'].includes(pred.side))return {state:'WAIT',detail:'Menunggu BUY/SELL terkonfirmasi.'};
+  const base=getSignalLifecycle(pred);
+  if(base.state==='TP / HIT'||base.state==='SL / MISS'||base.state==='CLOSED')return base;
+  const r=pred.riskPlan||buildSmartRiskPlan(pred), price=Number(S.c.at(-1)?.c||0);
+  if(!r?.valid)return {state:base.state||'ACTIVE',detail:base.detail||'Risk plan belum valid.'};
+  const tp2=Number(r.tp2||0), sl=Number(r.sl||0), tp1=Number(r.tp1||0);
+  if(pred.side==='BUY'){
+    if(tp2>0&&price>=tp2)return {state:'TP2 REACHED',detail:`Harga ${fmtIDR(price)} sudah mencapai TP2 ${fmtIDR(tp2)}.`};
+    if(tp1>0&&price>=tp1)return {state:'TP1 REACHED',detail:`Harga ${fmtIDR(price)} sudah mencapai TP1 ${fmtIDR(tp1)}.`};
+    if(sl>0&&price<=sl)return {state:'INVALIDATED',detail:`Harga ${fmtIDR(price)} berada di bawah invalidation/SL ${fmtIDR(sl)}.`};
+  }else{
+    if(tp2>0&&price<=tp2)return {state:'TP2 REACHED',detail:`Harga ${fmtIDR(price)} sudah mencapai TP2 ${fmtIDR(tp2)}.`};
+    if(tp1>0&&price<=tp1)return {state:'TP1 REACHED',detail:`Harga ${fmtIDR(price)} sudah mencapai TP1 ${fmtIDR(tp1)}.`};
+    if(sl>0&&price>=sl)return {state:'INVALIDATED',detail:`Harga ${fmtIDR(price)} berada di atas invalidation/SL ${fmtIDR(sl)}.`};
+  }
+  const readiness=pred.readiness?.label||getEntryReadiness(pred).label||'WAIT';
+  if(readiness==='READY')return {state:'READY',detail:`Signal ${pred.side} memenuhi readiness saat ini dan belum mencapai target/invalidation.`};
+  if(readiness==='WAIT-PULLBACK'||readiness==='LATE')return {state:'WAIT ENTRY',detail:`Signal ${pred.side} ada, tetapi entry belum ideal (${readiness}).`};
+  return {state:'ACTIVE',detail:`Signal ${pred.side} aktif; belum mencapai TP atau invalidation.`};
+}
+function updateLifecycle2(pred){
+  const current=lifecycle2State(pred); if(!current||current.state==='WAIT')return current;
+  const tf=$('signalTf')?.value||S.tf, ms=tfMillis(tf), anchorTs=Number(pred.anchorTs||pred.targetTs||S.c.at(-1)?.t||0), targetTs=Number(pred.targetTs||anchorTs+ms);
+  const idx=SIGNALS.findIndex(x=>x.symbol===S.symbol&&x.tf===tf&&Number(x.targetTs)===targetTs);
+  if(idx<0)return current;
+  const row=SIGNALS[idx]; const history=Array.isArray(row.lifecycleHistory)?row.lifecycleHistory:[];
+  const last=history.at(-1);
+  if(!last||last.state!==current.state){
+    history.push({state:current.state,detail:current.detail,at:Date.now(),price:Number(S.c.at(-1)?.c||0)});
+    SIGNALS[idx]={...row,lifecycleHistory:history.slice(-20),lifecycleState:current.state,lifecycleUpdatedAt:Date.now()};
+    persistSignals();
+  }
+  return {...current,row:SIGNALS[idx]};
+}
+function renderSignalLifecycle2(pred){
+  const host=$('signalLifecycle2'); if(!host)return;
+  const x=updateLifecycle2(pred);
+  if(!x||x.state==='WAIT'){host.innerHTML='<div class="ljHead"><div><span class="label">V5.55 SIGNAL LIFECYCLE 2.0</span><b>Menunggu signal</b></div></div><div class="note">Lifecycle akan mencatat perubahan state tanpa menulis ulang signal lama.</div>';return;}
+  const row=x.row, history=Array.isArray(row?.lifecycleHistory)?row.lifecycleHistory:[];
+  const events=history.slice().reverse().slice(0,8).map(e=>`<div class="lifecycleEvent"><span>${signalTime(e.at)}</span><b>${e.state}</b><small>${e.detail||''}</small></div>`).join('')||'<div class="note">Belum ada transition tersimpan.</div>';
+  const r=pred.riskPlan||buildSmartRiskPlan(pred);
+  const prices=r?.valid?`Entry ${fmtIDR(r.entry)} · SL ${fmtIDR(r.sl)} · TP1 ${fmtIDR(r.tp1)} · TP2 ${fmtIDR(r.tp2)}`:'Risk plan belum valid';
+  host.innerHTML=`<div class="ljHead"><div><span class="label">V5.55 SIGNAL LIFECYCLE 2.0</span><b>${pred.side} · ${x.state}</b></div><span class="sxeBadge ${lifecycle2Tone(x.state)}">${x.state}</span></div>
+  <div class="ljSummary"><div><small>CURRENT STATE</small><b>${x.state}</b></div><div><small>SIGNAL</small><b>${pred.side}</b></div><div><small>SCORE</small><b>${Number(pred.score||0)}/100</b></div><div><small>EVENTS</small><b>${history.length}</b></div></div>
+  <div class="ljFeedback">${x.detail}</div>
+  <div class="sxeIntelTitle" style="margin-top:10px">TRADE PLAN SNAPSHOT</div><div class="note">${prices}</div>
+  <div class="sxeIntelTitle" style="margin-top:10px">STATE TIMELINE</div><div class="lifecycleTimeline">${events}</div>
+  <div class="note" style="margin-top:8px">Lifecycle 2.0 mencatat perubahan state untuk audit. Ia tidak mengubah signal, leverage, SL/TP, atau membuka/menutup posisi secara otomatis.</div>`;
+}
+
+function renderAnalytics(){
+  const host=$('signalAnalytics'); if(!host)return;
+  const s=getAnalyticsStats(); const rate=s.decided?s.hit/s.decided:null;
+  const row=(x)=>`<div class="ljRow"><span>${x.key}</span><b>${Math.round(x.rate*100)}%</b><small>${x.n} sample</small></div>`;
+  const hist=s.recent.map(x=>`<div class="analyticsHistory"><span>${signalTime(x.targetTs||x.ts).replace(' WIB','')}</span><b class="${x.side==='BUY'?'buy':'sell'}">${x.side}</b><span>${Number(x.score||0)}/100</span><span>${Number.isFinite(Number(x.realizedR))?Number(x.realizedR).toFixed(2)+'R':'—'}</span></div>`).join('')||'<div class="note">Belum ada signal closed.</div>';
+  host.innerHTML=`<div class="ljHead"><div><span class="label">ANALYTICS LAYER</span><b>Performance Intelligence</b></div><span class="sxeBadge ${rate==null?'gold':rate>=.6?'good':'bad'}">${s.decided?Math.round(rate*100)+'% HIT':'BELUM ADA DATA'}</span></div>
+  <div class="ljSummary"><div><small>AVG CONFIDENCE</small><b>${s.avgConf==null?'—':Math.round(s.avgConf)+'/100'}</b></div><div><small>AVG REALIZED R</small><b>${s.closed?s.avgR.toFixed(2)+'R':'—'}</b></div><div><small>MAX LOSING STREAK</small><b>${s.maxLosing}</b></div><div><small>MAX R DRAWDOWN</small><b>${s.closed?s.maxDD.toFixed(2)+'R':'—'}</b></div></div>
+  <div class="analyticsGrid"><div><div class="sxeIntelTitle">PERFORMANCE BY TIMEFRAME</div>${s.byTf.slice(0,6).map(row).join('')||'<div class="note">Belum ada sample.</div>'}</div><div><div class="sxeIntelTitle">PERFORMANCE BY MARKET REGIME</div>${s.byRegime.slice(0,6).map(row).join('')||'<div class="note">Belum ada sample.</div>'}</div><div><div class="sxeIntelTitle">PERFORMANCE BY SIDE</div>${s.bySide.map(row).join('')||'<div class="note">Belum ada sample.</div>'}</div></div>
+  <div class="sxeIntelTitle" style="margin-top:10px">CONFIDENCE / REALIZED-R HISTORY</div><div class="analyticsHistoryHead"><span>TIME</span><span>SIDE</span><span>SCORE</span><span>REALIZED R</span></div>${hist}
+  <div class="note" style="margin-top:8px">TP Probability di sini menggunakan rasio outcome HIT pada sample yang sudah closed; bukan prediksi pasti untuk trade berikutnya.</div>`;
+}
+function renderLearningJournal(){
+  const host=$('learningJournal'); if(!host)return;
+  const s=getLearningJournalStats();
