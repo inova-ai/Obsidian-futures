@@ -182,12 +182,39 @@ app.post('/api/auth/login',async(qr,r)=>{try{const suppliedUser=String(qr.body.u
 app.post('/api/auth/logout',auth,(q,r)=>{r.json({ok:true})});
 function bybitInterval(v){const m={'1m':'1','3m':'3','5m':'5','15m':'15','30m':'30','1h':'60','2h':'120','4h':'240','6h':'360','12h':'720','1d':'D','3d':'D','1w':'W','1M':'M'};return m[String(v||'5m')]||'5'}
 async function bybitKlines(symbol,interval,limit){const u=new URL('/v5/market/kline',BYBIT_BASE);u.searchParams.set('category','linear');u.searchParams.set('symbol',symbol);u.searchParams.set('interval',bybitInterval(interval));u.searchParams.set('limit',String(Math.min(limit||500,1000)));const rr=await fetch(u,{headers:{'Accept':'application/json'}});const d=await rr.json().catch(()=>({}));if(!rr.ok||d.retCode!==0)throw Error(d.retMsg||`Bybit HTTP ${rr.status}`);return (d.result?.list||[]).reverse().map(x=>[+x[0],x[1],x[2],x[3],x[4],x[5],0,x[6]||'0',0,'0','0','0'])}
-async function marketKlines(symbol,interval,limit){const rows=await publicBinance('/fapi/v1/klines',{symbol,interval,limit});return {rows,source:'binance'}}
+async function marketKlines(symbol,interval,limit){
+  try{
+    const rows=await publicBinance('/fapi/v1/klines',{symbol,interval,limit});
+    return {rows,source:'binance'};
+  }catch(binanceError){
+    try{
+      const rows=await bybitKlines(symbol,interval,limit);
+      return {rows,source:'bybit-fallback',fallbackReason:binanceError?.message||'Binance market data unavailable'};
+    }catch(bybitError){
+      throw Error(`Market data unavailable · Binance: ${binanceError?.message||'error'} · Bybit: ${bybitError?.message||'error'}`);
+    }
+  }
+}
 app.get('/api/klines',async(qr,r)=>{try{const symbol=sym(qr.query.symbol),interval=qr.query.interval||'5m',limit=Math.min(+qr.query.limit||500,1500),x=await marketKlines(symbol,interval,limit);r.setHeader('Cache-Control','no-store');r.setHeader('X-Market-Data-Source',x.source);if(x.fallbackReason)r.setHeader('X-Market-Data-Fallback','1');r.json(x.rows)}catch(e){r.status(400).json({error:e.message})}});
 app.get('/api/ticker',async(qr,r)=>{try{r.json(await publicBinance('/fapi/v2/ticker/price',{symbol:sym(qr.query.symbol)}))}catch(e){r.status(400).json({error:e.message})}});
 app.get('/api/depth',async(qr,r)=>{try{r.json(await publicBinance('/fapi/v1/depth',{symbol:sym(qr.query.symbol),limit:100}))}catch(e){r.status(400).json({error:e.message})}});
 app.get('/api/open-interest',async(qr,r)=>{try{r.json(await publicBinance('/fapi/v1/openInterest',{symbol:sym(qr.query.symbol)}))}catch(e){r.status(400).json({error:e.message})}});
-app.get('/api/market/ticker',async(qr,r)=>{try{const symbol=sym(qr.query.symbol),interval=String(qr.query.interval||'5m');const [rows,mark]=await Promise.all([publicBinance('/fapi/v1/klines',{symbol,interval,limit:2}),publicBinance('/fapi/v1/premiumIndex',{symbol})]);const k=rows.at(-1);if(!k)throw Error('No kline data');r.setHeader('Cache-Control','no-store');r.json({symbol,interval,candle:{t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]},markPrice:mark.markPrice,indexPrice:mark.indexPrice,fundingRate:mark.lastFundingRate,serverTime:Date.now(),source:'binance'});}catch(e){r.status(400).json({error:e.message})}});
+app.get('/api/market/ticker',async(qr,r)=>{
+  try{
+    const symbol=sym(qr.query.symbol),interval=String(qr.query.interval||'5m');
+    try{
+      const [rows,mark]=await Promise.all([publicBinance('/fapi/v1/klines',{symbol,interval,limit:2}),publicBinance('/fapi/v1/premiumIndex',{symbol})]);
+      const k=rows.at(-1);if(!k)throw Error('No kline data');
+      r.setHeader('Cache-Control','no-store');
+      return r.json({symbol,interval,candle:{t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]},markPrice:mark.markPrice,indexPrice:mark.indexPrice,fundingRate:mark.lastFundingRate,serverTime:Date.now(),source:'binance'});
+    }catch(binanceError){
+      const rows=await bybitKlines(symbol,interval,2),k=rows.at(-1);
+      if(!k)throw Error('No fallback kline data');
+      r.setHeader('Cache-Control','no-store');
+      return r.json({symbol,interval,candle:{t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]},markPrice:+k[4],indexPrice:+k[4],fundingRate:0,serverTime:Date.now(),source:'bybit-fallback',fallbackReason:binanceError?.message||'Binance ticker unavailable'});
+    }
+  }catch(e){r.status(400).json({error:e.message})}
+});
 app.get('/api/exchange-info',async(qr,r)=>{try{const all=await publicBinance('/fapi/v1/exchangeInfo');const s=all.symbols.find(x=>x.symbol===sym(qr.query.symbol));if(!s)throw Error('Symbol not found');r.json(s)}catch(e){r.status(400).json({error:e.message})}});
 app.get('/api/force-orders',async(qr,r)=>{try{r.json(await publicBinance('/fapi/v1/forceOrders',{symbol:sym(qr.query.symbol),limit:20}))}catch(e){r.status(400).json({error:e.message})}});
 app.get('/api/ai/trend',async(qr,r)=>{try{const symbol=sym(qr.query.symbol||'BTCUSDT'),interval=qr.query.interval||'5m',x=await marketKlines(symbol,interval,150);r.setHeader('X-Market-Data-Source',x.source);r.json({symbol,interval,...aiTrend(x.rows),source:x.source,updatedAt:Date.now()})}catch(e){r.status(400).json({error:e.message})}});
