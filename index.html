@@ -317,16 +317,16 @@ body{background:#02070d!important;color:var(--ref-text)!important}
 <style id="scenario-lab-v588">.scenarioHead{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 12px;border-bottom:1px solid #173149}.scenarioHead b{display:block;margin-top:3px;font-size:12px}.scenarioTable{margin:0 10px 10px;border:1px solid #15344c;border-radius:9px;overflow:auto;background:#06121d}.scenarioRow{display:grid;grid-template-columns:1.55fr .35fr .7fr .7fr .6fr .6fr .5fr;gap:6px;align-items:center;padding:8px 9px;border-top:1px solid #142b3e;font-size:9px;min-width:690px}.scenarioHeader{border-top:0;color:#7891a7;font-size:8px;letter-spacing:.08em}.scenarioRow b{font-size:9px}.scenarioNotes{margin:0 10px 10px;padding:10px;border:1px solid #15344c;border-radius:9px;background:#06121d;font-size:9px;line-height:1.6}.scenarioNotes .note{margin-top:6px}.scenarioHead~.btn{margin:0 10px 10px}@media(max-width:700px){.scenarioRow{grid-template-columns:1.45fr .35fr .7fr .7fr .6fr .6fr .5fr}} </style><style id="scenario-decision-matrix-v589">.scenarioCurrent{outline:1px solid #2a5874;background:#081a28}.scenarioCurrent span:last-child{font-weight:700}.scenarioNotes b{font-size:10px}</style><style id="research-lab-v595">.labHead{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 12px;border-bottom:1px solid #173149}.labHead b{display:block;margin-top:3px;font-size:12px}.labGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px}.labBox{border:1px solid #15344c;border-radius:9px;background:#06121d;padding:10px;font-size:9px;line-height:1.55}.labBox h4{margin:0 0 6px;font-size:10px;letter-spacing:.04em}.labBox p{margin:6px 0 0;color:#7891a7}.labLine{display:flex;justify-content:space-between;border-top:1px solid #142b3e;padding:5px 0}.labBox+.labBox{margin-top:8px}@media(max-width:700px){.labGrid{grid-template-columns:1fr}}</style><style id="control-center-v600">.controlHead{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 12px;border-bottom:1px solid #173149}.controlHead b{display:block;margin-top:3px;font-size:12px}.controlGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px}.controlBox{border:1px solid #15344c;border-radius:9px;background:#06121d;padding:10px;font-size:9px;line-height:1.55}.controlBox h4{margin:0 0 6px;font-size:10px;letter-spacing:.04em}.controlDecision{font-size:22px;font-weight:900;letter-spacing:.08em;padding:10px 0}.controlBox .labLine{display:flex;justify-content:space-between;border-top:1px solid #142b3e;padding:5px 0}.controlBox .labLine span{color:#8298aa}.controlBox .labLine b{font-size:9px}.controlBox p{margin:6px 0;color:#7891a7}@media(max-width:700px){.controlGrid{grid-template-columns:1fr}}</style>
 <style id="v602-dashboard-rebuild">
 /* V6.02 — dashboard rebuild: compact default view, responsive feature map, no feature wall on mobile */
-.workspace.view-dashboard{grid-template-columns:1fr!important}
-.workspace.view-dashboard>.grid{grid-template-columns:1fr!important}
-.workspace.view-dashboard>.grid>main>.liveStrip,
-.workspace.view-dashboard>.grid>main>.livePositionHero,
-.workspace.view-dashboard>.grid>main>.accountDock,
-.workspace.view-dashboard>.grid>.side{display:none!important}
-.workspace.view-dashboard>.chartStage{grid-column:1!important}
-.workspace.view-dashboard>.grid>main{padding-top:10px!important}
-.workspace.view-dashboard .bottom{margin-top:0!important}
-.workspace.view-dashboard .tabs{position:sticky;top:0;z-index:8;box-shadow:0 8px 24px rgba(0,0,0,.22)}
+body[data-view="dashboard"] .workspace{grid-template-columns:1fr!important}
+body[data-view="dashboard"] .workspace>.grid{grid-template-columns:1fr!important}
+body[data-view="dashboard"] .workspace>.grid>main>.liveStrip,
+body[data-view="dashboard"] .workspace>.grid>main>.livePositionHero,
+body[data-view="dashboard"] .workspace>.grid>main>.accountDock,
+body[data-view="dashboard"] .workspace>.grid>.side{display:none!important}
+body[data-view="dashboard"] .workspace>.chartStage{grid-column:1!important}
+body[data-view="dashboard"] .workspace>.grid>main{padding-top:10px!important}
+body[data-view="dashboard"] .workspace .bottom{margin-top:0!important}
+body[data-view="dashboard"] .workspace .tabs{position:sticky;top:0;z-index:8;box-shadow:0 8px 24px rgba(0,0,0,.22)}
 .chartbox{position:relative;overflow:hidden}
 #chartStatus{backdrop-filter:none!important}
 .fdHero{border-width:1px!important}
@@ -335,25 +335,25 @@ body{background:#02070d!important;color:var(--ref-text)!important}
 .fdCard:hover{transform:translateY(-1px);border-color:#2d5875;background:linear-gradient(180deg,#0c1b29,#071019)}
 .fdOpen{min-width:52px}
 @media(max-width:900px){
-  .workspace.view-dashboard{padding:0!important;display:block!important}
-  .workspace.view-dashboard>.chartStage{padding:6px!important}
-  .workspace.view-dashboard>.chartStage .panel{border-radius:10px!important}
-  .workspace.view-dashboard>.chartStage .chartbox{height:min(52svh,430px)!important;min-height:290px!important}
-  .workspace.view-dashboard>.grid{margin:0!important;display:block!important}
-  .workspace.view-dashboard>.grid>main{padding:6px!important}
-  .workspace.view-dashboard .bottom{border-radius:10px!important}
-  .workspace.view-dashboard .tabs{overflow-x:auto;white-space:nowrap;scrollbar-width:none}
-  .workspace.view-dashboard .tabs::-webkit-scrollbar{display:none}
-  .workspace.view-dashboard .tab{padding:9px 10px!important;font-size:9px!important}
+  body[data-view="dashboard"] .workspace{padding:0!important;display:block!important}
+  body[data-view="dashboard"] .workspace>.chartStage{padding:6px!important}
+  body[data-view="dashboard"] .workspace>.chartStage .panel{border-radius:10px!important}
+  body[data-view="dashboard"] .workspace>.chartStage .chartbox{height:min(52svh,430px)!important;min-height:290px!important}
+  body[data-view="dashboard"] .workspace>.grid{margin:0!important;display:block!important}
+  body[data-view="dashboard"] .workspace>.grid>main{padding:6px!important}
+  body[data-view="dashboard"] .workspace .bottom{border-radius:10px!important}
+  body[data-view="dashboard"] .workspace .tabs{overflow-x:auto;white-space:nowrap;scrollbar-width:none}
+  body[data-view="dashboard"] .workspace .tabs::-webkit-scrollbar{display:none}
+  body[data-view="dashboard"] .workspace .tab{padding:9px 10px!important;font-size:9px!important}
 }
 @media(max-width:520px){
-  .workspace.view-dashboard>.chartStage .chartbox{height:340px!important;min-height:270px!important}
-  .workspace.view-dashboard>.chartStage .toolbar{overflow-x:auto;flex-wrap:nowrap;white-space:nowrap}
-  .workspace.view-dashboard>.chartStage .toolbar>.note,.workspace.view-dashboard>.chartStage .chartHint{display:none}
-  .workspace.view-dashboard .fdStats{grid-template-columns:1fr 1fr!important}
-  .workspace.view-dashboard .fdGrid{grid-template-columns:1fr!important}
-  .workspace.view-dashboard .fdChecks{grid-template-columns:1fr 1fr!important}
-  .workspace.view-dashboard .fdHero h2{font-size:17px}
+  body[data-view="dashboard"] .workspace>.chartStage .chartbox{height:340px!important;min-height:270px!important}
+  body[data-view="dashboard"] .workspace>.chartStage .toolbar{overflow-x:auto;flex-wrap:nowrap;white-space:nowrap}
+  body[data-view="dashboard"] .workspace>.chartStage .toolbar>.note,body[data-view="dashboard"] .workspace>.chartStage .chartHint{display:none}
+  body[data-view="dashboard"] .workspace .fdStats{grid-template-columns:1fr 1fr!important}
+  body[data-view="dashboard"] .workspace .fdGrid{grid-template-columns:1fr!important}
+  body[data-view="dashboard"] .workspace .fdChecks{grid-template-columns:1fr 1fr!important}
+  body[data-view="dashboard"] .workspace .fdHero h2{font-size:17px}
 }
 /* Any non-dashboard tab on phones should prioritize the selected module instead of the long analysis rail. */
 @media(max-width:900px){
@@ -373,7 +373,7 @@ body{background:#02070d!important;color:var(--ref-text)!important}
     <div class="railItem"><span class="railIcon">⚙</span><span>Pengaturan</span></div>
   </div>
   <div class="railPromo"><div class="promoDiamond">◆</div><b>OBSIDIAN</b><span>Trade Smarter</span><span>With AI</span></div>
-  <div class="railFoot"><span>v6.02</span><span><i></i> Online</span></div>
+  <div class="railFoot"><span>v6.03</span><span><i></i> Online</span></div>
 </nav>
 <div id="authbar" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:20;align-items:center;justify-content:center"><div class="panel" style="width:min(420px,92vw);padding:18px"><h2>Obsidian Access</h2><div id="authmsg" class="note">Buat akun lokal atau login.</div><input id="au" placeholder="Username" style="width:100%;margin:6px 0;padding:10px"><input id="ap" type="password" placeholder="Password min 12 karakter" style="width:100%;margin:6px 0;padding:10px"><input id="ac" placeholder="2FA code (jika aktif)" style="width:100%;margin:6px 0;padding:10px"><div class="row"><button class="btn" id="aset">Setup</button><button class="btn active" id="alog">Login</button></div></div></div><header class="top"><div class="brand">OBSIDIAN <i>INTELLIGENCE v5</i></div><div class="pair" id="pair">BTCUSDT</div><div class="price" id="price">—</div><div class="grow"></div><div class="badge" id="conn">OFFLINE</div><div class="badge" id="mode">DEMO</div><div class="badge" id="accountMode">ACCOUNT —</div><button class="btn" id="installPwa" style="display:none">＋ PASANG APP</button><button class="btn danger" id="kill">KILL</button></header>
 <section id="credentialPanel" style="display:none;margin:12px 0;padding:12px;border:1px solid #293246;border-radius:12px;background:#111722"><h3 style="margin:0 0 8px">Binance API Credentials</h3><div class="g3"><label class="field">API Key<input id="apiKey" autocomplete="off"></label><label class="field">API Secret<input id="apiSecret" type="password" autocomplete="new-password"></label><label class="field">2FA Code<input id="credCode" inputmode="numeric" maxlength="6" placeholder="Jika 2FA aktif"></label></div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button class="btn" id="saveCred">Simpan Credential</button><button class="btn" id="removeCred">Hapus Credential</button><button class="btn" id="testBinance">Test Binance</button></div><div id="credStatus" class="note" style="margin-top:8px">Credential tersimpan di server dalam bentuk terenkripsi. Setelah disimpan, form tetap mempertahankan input agar tidak terlihat hilang. Untuk keamanan, jangan bagikan API Secret.</div></section><div class="workspace">
@@ -502,7 +502,7 @@ body{background:#02070d!important;color:var(--ref-text)!important}
   .grid main{padding:8px}
 }
 </style>
-<script src="/app.js?v=6.02"></script>
+<script src="/app.js?v=6.03"></script>
 <style>
 /* v5.41.8 — reference UI layout + phone edge-to-edge responsive workspace */
 html,body{width:100%;max-width:100%;overflow-x:hidden}

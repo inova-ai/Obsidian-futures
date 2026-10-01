@@ -28,7 +28,7 @@ let lastAutoSignalKey=localStorage.getItem('obsidian_auto_last_signal')||null;
 let SHADOW_ENABLED=localStorage.getItem('obsidian_shadow_mode')==='1';
 let SHADOW_ROWS=(()=>{try{return JSON.parse(localStorage.getItem('obsidian_shadow_rows')||'[]')}catch{return []}})();
 
-const STRATEGY_VERSION='5.99.0';
+const STRATEGY_VERSION='6.03.0';
 const STRATEGY_FREEZE_KEY='obsidian_strategy_freeze_v585';
 let STRATEGY_FREEZE=(()=>{try{return JSON.parse(localStorage.getItem(STRATEGY_FREEZE_KEY)||'null')}catch{return null}})();
 let PAPER_ADAPTIVE_RISK=localStorage.getItem('obsidian_paper_adaptive_risk_v579')!=='0';
@@ -620,10 +620,57 @@ function priceMap(){let w=Math.max(1,cv.clientWidth),h=Math.max(1,cv.clientHeigh
 function line(a,v,py,dx,col){ctx.strokeStyle=col||'#d9b56c';ctx.beginPath();v.forEach((z,i)=>{let x=45+i*dx,y=py(z);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke()}
 function hline(p,py,w,col){ctx.strokeStyle=col;ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(45,py(p));ctx.lineTo(w,py(p));ctx.stroke();ctx.setLineDash([])}
 function dot(i,p,dx,py,col,t){let x=45+i*dx,y=py(p);ctx.fillStyle=col;ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fill();ctx.fillText(t,x+4,y-4)}
-async function load(){chartStatus('Mengambil data candlestick…');try{stopPolling();closeMarketWS();closePublicWS();try{const rt=await jsonFetch('/api/runtime');MARKET_WS_BASE=rt.marketWs||MARKET_WS_BASE;PUBLIC_WS_BASE=rt.publicWs||PUBLIC_WS_BASE;USER_WS_BASE=rt.userWs||rt.binanceWs||USER_WS_BASE;USER_WS_MODE=rt.userWsMode||USER_WS_MODE;USDT_IDR_RATE=Number(rt.usdtIdrRate||USDT_IDR_RATE);updateModeUI(rt);await loadOrderConstraints()}catch{}let r=await fetch(`/api/klines?symbol=${S.symbol}&interval=${S.tf}&limit=500`,{cache:'no-store'}),source=r.headers.get('X-Market-Data-Source')||'binance';let d=await r.json();if(!r.ok||d.error)throw Error(d.error||`Market data HTTP ${r.status}`);S.c=d.map(x=>({t:+x[0],o:+x[1],h:+x[2],l:+x[3],c:+x[4],v:+x[5]}));$('price').textContent=fmtIDR(S.c.at(-1)?.c);$('conn').textContent=source==='bybit-fallback'?'MARKET DATA · BYBIT FALLBACK':'CONNECTING REALTIME…';$('conn').title=source==='bybit-fallback'?'Binance REST unavailable; chart history is using Bybit fallback.':'Connecting directly to Binance Futures WebSocket';S.swings=swings(S.c);smart();safeDraw();calc();connect();connectPublic();connectAccountWS();if($('signalTf'))$('signalTf').value=S.tf;mtf();refreshSignalFromCurrent();updateAITrend();updateLiveSignal();}catch(e){$('conn').textContent='MARKET DATA ERROR';$('conn').title=e.message;chartStatus('Data chart gagal dimuat: '+e.message+' — mencoba fallback market data…');startPolling()}}
+async function clientMarketKlines(symbol,interval,limit=500){
+  const bInt=({ '1m':'1','3m':'3','5m':'5','15m':'15','30m':'30','1h':'60','2h':'120','4h':'240','6h':'360','12h':'720','1d':'D','3d':'D','1w':'W','1M':'M'})[String(interval)]||'5';
+  const urls=[
+    `https://fapi.binance.com/fapi/v1/klines?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&limit=${Math.min(Number(limit)||500,1000)}`,
+    `https://api.bybit.com/v5/market/kline?category=linear&symbol=${encodeURIComponent(symbol)}&interval=${bInt}&limit=${Math.min(Number(limit)||500,1000)}`
+  ];
+  let last='';
+  for(const url of urls){
+    try{
+      const r=await fetch(url,{cache:'no-store'});
+      const d=await r.json();
+      if(!r.ok)throw Error(`HTTP ${r.status}`);
+      if(url.includes('binance.com/fapi')){
+        if(!Array.isArray(d)||!d.length)throw Error('Empty Binance candles');
+        return {rows:d,source:'browser-binance'};
+      }
+      if(d?.retCode!==0)throw Error(d?.retMsg||'Bybit error');
+      const rows=(d.result?.list||[]).reverse().map(x=>[+x[0],x[1],x[2],x[3],x[4],x[5]]);
+      if(!rows.length)throw Error('Empty Bybit candles');
+      return {rows,source:'browser-bybit'};
+    }catch(e){last=e?.message||String(e)}
+  }
+  throw Error(`Browser market fallback gagal: ${last}`);
+}
+async function fetchMarketKlines(symbol,interval,limit=500){
+  try{
+    const r=await fetch(`/api/klines?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&limit=${limit}`,{cache:'no-store'});
+    const d=await r.json().catch(()=>null);
+    if(!r.ok||!Array.isArray(d)||!d.length)throw Error(d?.error||`API market HTTP ${r.status}`);
+    return {rows:d,source:r.headers.get('X-Market-Data-Source')||'server'};
+  }catch(e){
+    return clientMarketKlines(symbol,interval,limit);
+  }
+}
+async function clientMarketTicker(symbol,interval){
+  try{
+    const r=await fetch(`/api/market/ticker?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}`,{cache:'no-store'});
+    const d=await r.json().catch(()=>null);
+    if(!r.ok||!d?.candle)throw Error(d?.error||`API ticker HTTP ${r.status}`);
+    return d;
+  }catch{
+    const x=await clientMarketKlines(symbol,interval,2),k=x.rows.at(-1);
+    const mark=Number(k?.[4]||0);
+    return {symbol,interval,candle:{t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]},markPrice:mark,indexPrice:mark,fundingRate:0,source:x.source};
+  }
+}
+
+async function load(){chartStatus('Mengambil data candlestick…');try{stopPolling();closeMarketWS();closePublicWS();try{const rt=await jsonFetch('/api/runtime');MARKET_WS_BASE=rt.marketWs||MARKET_WS_BASE;PUBLIC_WS_BASE=rt.publicWs||PUBLIC_WS_BASE;USER_WS_BASE=rt.userWs||rt.binanceWs||USER_WS_BASE;USER_WS_MODE=rt.userWsMode||USER_WS_MODE;USDT_IDR_RATE=Number(rt.usdtIdrRate||USDT_IDR_RATE);updateModeUI(rt);await loadOrderConstraints()}catch{}const md=await fetchMarketKlines(S.symbol,S.tf,500),source=md.source||'market';let d=md.rows;S.c=d.map(x=>({t:+x[0],o:+x[1],h:+x[2],l:+x[3],c:+x[4],v:+x[5]}));$('price').textContent=fmtIDR(S.c.at(-1)?.c);$('conn').textContent=/bybit/i.test(source)?'MARKET DATA · BYBIT':/browser-binance|binance/i.test(source)?'MARKET DATA · BINANCE':'MARKET DATA · SERVER';$('conn').title=source==='bybit-fallback'?'Binance REST unavailable; chart history is using Bybit fallback.':'Connecting directly to Binance Futures WebSocket';S.swings=swings(S.c);smart();safeDraw();calc();connect();connectPublic();connectAccountWS();if($('signalTf'))$('signalTf').value=S.tf;mtf();refreshSignalFromCurrent();updateAITrend();updateLiveSignal();}catch(e){$('conn').textContent='MARKET DATA ERROR';$('conn').title=e.message;chartStatus('Data chart gagal dimuat: '+e.message+' — mencoba fallback market data…');startPolling()}}
 function stopPolling(){if(pollTimer){clearInterval(pollTimer);pollTimer=null}}
-async function pollKlines(){if(marketWsConnected)return;try{const r=await fetch(`/api/klines?symbol=${S.symbol}&interval=${S.tf}&limit=500`,{cache:'no-store'});const d=await r.json();if(marketWsConnected)return;if(!r.ok||d.error)throw Error(d.error||`Market data HTTP ${r.status}`);const rows=d.map(x=>({t:+x[0],o:+x[1],h:+x[2],l:+x[3],c:+x[4],v:+x[5]}));if(!rows.length)return;S.c=rows;const source=r.headers.get('X-Market-Data-Source')||'binance';$('price').textContent=fmtIDR(S.c.at(-1).c);$('conn').textContent=source==='bybit-fallback'?'MARKET DATA · BYBIT':'REST FALLBACK · BINANCE';S.swings=swings(S.c);smart();calc();safeDraw()}catch(e){$('conn').title=e.message}}
-async function pollLive(){if(marketWsConnected)return;try{const r=await fetch(`/api/market/ticker?symbol=${S.symbol}&interval=${S.tf}`,{cache:'no-store'});const d=await r.json();if(marketWsConnected)return;if(!r.ok||d.error)throw Error(d.error||`Market ticker HTTP ${r.status}`);if(d.candle){const c={t:+d.candle.t,o:+d.candle.o,h:+d.candle.h,l:+d.candle.l,c:+d.candle.c,v:+d.candle.v},q=S.c.at(-1);if(q?.t===c.t)S.c[S.c.length-1]=c;else if(!q||c.t>q.t){S.c.push(c);if(PAPER_ENABLED)paperTryEnterAtOpen(c); if(SIM_ENABLED)simEnterAtOpen(c);}if(S.c.length>500)S.c.shift();$('price').textContent=fmtIDR(c.c);$('mark').textContent=fmtIDR(d.markPrice);$('index').textContent=fmtIDR(d.indexPrice);$('funding').textContent=(+d.fundingRate*100).toFixed(4)+'%';S.market.mark=+d.markPrice;S.market.index=+d.indexPrice;S.market.funding=+d.fundingRate;updateLiveSignal();S.swings=swings(S.c);smart();calc();safeDraw()}}catch(e){$('conn').title='REST fallback: '+e.message}}
+async function pollKlines(){if(marketWsConnected)return;try{const md=await fetchMarketKlines(S.symbol,S.tf,500);if(marketWsConnected)return;const rows=md.rows.map(x=>({t:+x[0],o:+x[1],h:+x[2],l:+x[3],c:+x[4],v:+x[5]}));if(!rows.length)return;S.c=rows;const source=md.source||'market';$('price').textContent=fmtIDR(S.c.at(-1).c);$('conn').textContent=/bybit/i.test(source)?'MARKET DATA · BYBIT':'MARKET DATA · BINANCE';S.swings=swings(S.c);smart();calc();safeDraw()}catch(e){$('conn').title=e.message}}
+async function pollLive(){if(marketWsConnected)return;try{const d=await clientMarketTicker(S.symbol,S.tf);if(marketWsConnected)return;if(d.candle){const c={t:+d.candle.t,o:+d.candle.o,h:+d.candle.h,l:+d.candle.l,c:+d.candle.c,v:+d.candle.v},q=S.c.at(-1);if(q?.t===c.t)S.c[S.c.length-1]=c;else if(!q||c.t>q.t){S.c.push(c);if(PAPER_ENABLED)paperTryEnterAtOpen(c); if(SIM_ENABLED)simEnterAtOpen(c);}if(S.c.length>500)S.c.shift();$('price').textContent=fmtIDR(c.c);$('mark').textContent=fmtIDR(d.markPrice);$('index').textContent=fmtIDR(d.indexPrice);$('funding').textContent=(+d.fundingRate*100).toFixed(4)+'%';S.market.mark=+d.markPrice;S.market.index=+d.indexPrice;S.market.funding=+d.fundingRate;updateLiveSignal();S.swings=swings(S.c);smart();calc();safeDraw()}}catch(e){$('conn').title='REST fallback: '+e.message}}
 function startPolling(){if(pollTimer)return;pollKlines();pollLive();pollTimer=setInterval(()=>{pollKlines();pollLive()},2000)}
 function scheduleMarketReconnect(){if(marketWsRetryTimer)return;const delay=Math.min(30000,Math.max(1000,2**marketWsRetry*1000));marketWsRetry=Math.min(marketWsRetry+1,5);marketWsRetryTimer=setTimeout(()=>{marketWsRetryTimer=null;connect()},delay)}
 function schedulePublicReconnect(){if(publicWsRetryTimer)return;const delay=Math.min(30000,Math.max(1000,2**publicWsRetry*1000));publicWsRetry=Math.min(publicWsRetry+1,5);publicWsRetryTimer=setTimeout(()=>{publicWsRetryTimer=null;connectPublic()},delay)}
