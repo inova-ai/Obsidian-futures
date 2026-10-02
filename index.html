@@ -373,7 +373,7 @@ body[data-view="dashboard"] .workspace .tabs{position:sticky;top:0;z-index:8;box
     <div class="railItem"><span class="railIcon">⚙</span><span>Pengaturan</span></div>
   </div>
   <div class="railPromo"><div class="promoDiamond">◆</div><b>OBSIDIAN</b><span>Trade Smarter</span><span>With AI</span></div>
-  <div class="railFoot"><span>v6.04</span><span><i></i> Online</span></div>
+  <div class="railFoot"><span>v6.18.2</span><span><i></i> Online</span></div>
 </nav>
 <div id="authbar" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:20;align-items:center;justify-content:center"><div class="panel" style="width:min(420px,92vw);padding:18px"><h2>Obsidian Access</h2><div id="authmsg" class="note">Buat akun lokal atau login.</div><input id="au" placeholder="Username" style="width:100%;margin:6px 0;padding:10px"><input id="ap" type="password" placeholder="Password min 12 karakter" style="width:100%;margin:6px 0;padding:10px"><input id="ac" placeholder="2FA code (jika aktif)" style="width:100%;margin:6px 0;padding:10px"><div class="row"><button class="btn" id="aset">Setup</button><button class="btn active" id="alog">Login</button></div></div></div><header class="top"><div class="brand">OBSIDIAN <i>INTELLIGENCE v5</i></div><div class="pair" id="pair">BTCUSDT</div><div class="price" id="price">—</div><div class="grow"></div><div class="badge" id="conn">OFFLINE</div><div class="badge" id="mode">DEMO</div><div class="badge" id="accountMode">ACCOUNT —</div><button class="btn" id="installPwa" style="display:none">＋ PASANG APP</button><button class="btn danger" id="kill">KILL</button></header>
 <section id="credentialPanel" style="display:none;margin:12px 0;padding:12px;border:1px solid #293246;border-radius:12px;background:#111722"><h3 style="margin:0 0 8px">Binance API Credentials</h3><div class="g3"><label class="field">API Key<input id="apiKey" autocomplete="off"></label><label class="field">API Secret<input id="apiSecret" type="password" autocomplete="new-password"></label><label class="field">2FA Code<input id="credCode" inputmode="numeric" maxlength="6" placeholder="Jika 2FA aktif"></label></div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button class="btn" id="saveCred">Simpan Credential</button><button class="btn" id="removeCred">Hapus Credential</button><button class="btn" id="testBinance">Test Binance</button></div><div id="credStatus" class="note" style="margin-top:8px">Credential tersimpan di server dalam bentuk terenkripsi. Setelah disimpan, form tetap mempertahankan input agar tidak terlihat hilang. Untuk keamanan, jangan bagikan API Secret.</div></section><div class="workspace">
@@ -502,7 +502,135 @@ body[data-view="dashboard"] .workspace .tabs{position:sticky;top:0;z-index:8;box
   .grid main{padding:8px}
 }
 </style>
-<script src="/app-v6.06.js"></script>
+<script src="/app-v6.18.js"></script>
+
+<script>
+(function(){
+  const $=(s,r=document)=>r.querySelector(s);
+  const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+
+  function folder(title, meta, nodes, open=false, icon='▸'){
+    const box=document.createElement('section');
+    box.className='cleanFolder'+(open?' open':'');
+    const head=document.createElement('button');
+    head.type='button';
+    head.className='cleanFolderHead';
+    head.innerHTML='<span class="folderLeft"><span class="folderIcon">'+icon+'</span><span>'+title+'</span></span><span style="display:flex;align-items:center;gap:8px"><span class="folderMeta">'+(meta||'')+'</span><span class="folderChevron">▼</span></span>';
+    const body=document.createElement('div');
+    body.className='cleanFolderBody';
+    nodes.filter(Boolean).forEach(n=>body.appendChild(n));
+    box.append(head,body);
+    head.addEventListener('click',()=>{
+      const was=box.classList.contains('open');
+      const parent=box.parentElement;
+      if(parent) $$('.cleanFolder.open',parent).forEach(x=>{if(x!==box)x.classList.remove('open')});
+      box.classList.toggle('open',!was);
+      try{ if(typeof resize==='function') resize(); if(typeof safeDraw==='function') safeDraw(); }catch(e){}
+    });
+    return box;
+  }
+
+  function groupSignalModules(){
+    const sd=$('.signalDropV4');
+    if(!sd || $('#cleanSignalFolders')) return;
+    const feed=$('#forecastFeed');
+    if(!feed) return;
+
+    const signalIds=['signalExplanation','marketIntelligence','marketContext'];
+    const safetyIds=['shadowModeV567','capitalProtectionV568','decisionEngineV569','liveResearchV570','dataQualityV571','strategyVersioningV572','killSwitchIntelligenceV573','decisionAuditV574','preTradeChecklistV584','strategyFreezeV585','tradingOperatingSystemV575'];
+    const learningIds=['learningJournal','signalAnalytics','signalReplay','adaptiveOptimization','confidenceCalibration','strategyIntelligence','tradePlanIntelligence','profitabilityGate','riskOptimizer'];
+    const researchIds=['strategyResearch','walkForwardV560','monteCarloV561','combinedValidationV566','regimeStrategy','executionQuality','costFundingEngine','fullHistoricalBacktest','signalLifecycle2'];
+
+    const byIds=ids=>ids.map(id=>document.getElementById(id)).filter(Boolean);
+    const host=document.createElement('div');
+    host.id='cleanSignalFolders';
+
+    const modules=[...byIds(signalIds),...byIds(safetyIds),...byIds(learningIds),...byIds(researchIds)];
+    // Move the long module cards out of the realtime feed area into four closed folders.
+    host.append(
+      folder('ANALISIS & SIGNAL','signal explanation + market context',byIds(signalIds),true,'🧠'),
+      folder('RISK & SAFETY','protection + decision gates',byIds(safetyIds),false,'🛡️'),
+      folder('LEARNING & ANALYTICS','outcomes + calibration',byIds(learningIds),false,'📊'),
+      folder('RESEARCH & VALIDATION','replay + backtest + robustness',byIds(researchIds),false,'🧪')
+    );
+
+    const note=$$('.signalNote',sd).pop();
+    // Insert after forecast feed; all module cards are removed from their old positions automatically.
+    feed.insertAdjacentElement('afterend',host);
+    if(note) host.insertAdjacentElement('afterend',note);
+  }
+
+  function groupSideSections(){
+    const side=$('.side');
+    if(!side || $('#cleanSideTop')) return;
+    const secs=$$(' :scope > .sec',side);
+    if(!secs.length) return;
+
+    const entry=secs.slice(0,3);
+    const analysis=secs.slice(3,4);
+    const market=secs.slice(4,6);
+
+    const host=document.createElement('div');
+    host.id='cleanSideTop';
+
+    // Signal panel stays at top and its long modules are already folded.
+    const signal=$(':scope > .signalDropV4',side);
+    if(signal){
+      const sigFolder=folder('AI SIGNALS','realtime + forecasts',[signal],true,'✦');
+      host.appendChild(sigFolder);
+    }
+
+    if(entry.length) host.appendChild(folder('ENTRY & EXECUTION','harga + SL/TP + kontrol',entry,false,'⚡'));
+    if(analysis.length) host.appendChild(folder('INDIKATOR','analisis teknikal',analysis,false,'◈'));
+    if(market.length) host.appendChild(folder('MARKET DATA','data pasar + order book',market,false,'◉'));
+
+    // Put any remaining direct children into a system folder instead of leaving a long stack.
+    const consumed=new Set([...(signal?[signal]:[]),...secs]);
+    const remaining=$$(':scope > *',side).filter(n=>!consumed.has(n));
+    // Keep only meaningful visible blocks; hidden legacy nodes are left alone in place.
+    const visible=remaining.filter(n=>getComputedStyle(n).display!=='none' && !n.matches('#cleanSideTop'));
+    if(visible.length){
+      visible.forEach(n=>n.remove());
+      host.appendChild(folder('LAINNYA','modul tambahan',visible,false,'＋'));
+    }
+
+    side.replaceChildren(host);
+  }
+
+  function compactMain(){
+    // Collapse the very tall live/account area into two folders on small screens.
+    const main=$('.workspace>.grid>main');
+    if(!main || $('#cleanMainFolders')) return;
+    const live=$(':scope > .liveStrip',main);
+    const pos=$(':scope > .livePositionHero',main);
+    const account=$(':scope > .accountDock',main);
+    if(!live||!pos||!account) return;
+
+    const tabs=$(':scope > .panel.bottom',main);
+    const host=document.createElement('div');
+    host.id='cleanMainFolders';
+    host.className='folderShell';
+    host.append(
+      folder('STATUS LIVE','signal + candle realtime',[live],true,'◉'),
+      folder('POSISI & AUTO TRADE','position + automation',[pos,account],false,'↗')
+    );
+    main.insertBefore(host,tabs||null);
+  }
+
+  function init(){
+    try{
+      compactMain();
+      groupSignalModules();
+      groupSideSections();
+      document.title='OBSIDIAN | Futures Intelligence v6.18.2';
+    }catch(e){console.warn('V6.18.2 folder UI',e);}
+  }
+
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init,{once:true});
+  else setTimeout(init,0);
+})();
+</script>
+
 <style>
 /* v5.41.8 — reference UI layout + phone edge-to-edge responsive workspace */
 html,body{width:100%;max-width:100%;overflow-x:hidden}
@@ -687,5 +815,57 @@ body{min-width:0}
 .fdHero h2{margin:5px 0 4px;font-size:20px;letter-spacing:-.02em}.fdHero p{margin:0;color:#8ea2b6;font-size:10px;line-height:1.5}.fdDecision{min-width:135px;padding:13px;border:1px solid #29415a;border-radius:12px;background:#09131e;display:flex;flex-direction:column;justify-content:center;text-align:center}.fdDecision small{color:#7e91a5;font-size:8px;letter-spacing:.12em}.fdDecision b{font-size:25px;margin:3px 0}.fdDecision span{font-size:9px;color:#8ea2b6}.fdStats{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;margin-top:9px}.fdStats>div{padding:10px;border:1px solid #173149;border-radius:10px;background:#07111b}.fdStats small{display:block;color:#71879c;font-size:8px;letter-spacing:.08em}.fdStats b{display:block;margin-top:4px;font-size:12px}.fdStats span{display:block;margin-top:3px;color:#8296a9;font-size:8px}.fdSection{margin-top:10px;padding:11px;border:1px solid #173149;border-radius:12px;background:#06101a}.fdSectionHead{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:9px}.fdSectionHead b{display:block;margin-top:3px;font-size:13px}.fdCount{font-size:8px;color:#d9b56c;border:1px solid #5d4b28;border-radius:999px;padding:5px 8px}.fdGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.fdCard{min-width:0;padding:11px;border:1px solid #19334a;border-radius:10px;background:linear-gradient(180deg,#0a1621,#071019)}.fdCardTop{display:flex;justify-content:space-between;align-items:center}.fdIcon{font-size:8px;font-weight:950;letter-spacing:.12em;color:#d9b56c;border:1px solid #5b4a29;padding:4px 6px;border-radius:6px}.fdIndex{font-size:8px;color:#52687d}.fdCard h3{font-size:12px;margin:10px 0 4px}.fdCard p{height:30px;margin:0;color:#8297aa;font-size:9px;line-height:1.45}.fdCardFoot{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:10px;padding-top:8px;border-top:1px solid #14283a}.fdCardFoot>span{font-size:8px;color:#74899c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.fdOpen{padding:5px 8px!important;font-size:8px!important;flex:none}.fdChecklist{padding-bottom:12px}.fdChecks{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.fdChecks>div{display:grid;grid-template-columns:24px 1fr;column-gap:7px;align-items:center;padding:8px;border:1px solid #173149;border-radius:8px;background:#08131e}.fdChecks i{grid-row:span 2;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:#101b25;font-style:normal;font-size:11px}.fdChecks b{font-size:9px}.fdChecks span{font-size:8px;color:#8094a8}.fdChecks .good{color:#27e78f}.fdChecks .gold{color:#d9b56c}.fdChecks .bad{color:#ff5574}
 @media(max-width:900px){.fdStats{grid-template-columns:repeat(3,1fr)}.fdGrid{grid-template-columns:repeat(2,1fr)}.fdChecks{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:600px){.fdHero{padding:12px;flex-direction:column}.fdHero h2{font-size:16px}.fdDecision{min-width:0;min-height:82px}.fdStats{grid-template-columns:1fr 1fr}.fdGrid{grid-template-columns:1fr}.fdChecks{grid-template-columns:1fr 1fr}.fdCard p{height:auto;min-height:30px}}
+
+/* V6.08 market scanner */
+.scannerHead{display:flex;align-items:center;justify-content:space-between;gap:10px}.scannerHead b{display:block;font-size:15px;margin-top:3px}.scannerStatus{font-size:11px;color:#8d9aaa;margin-top:4px}.scannerSafe{margin-top:8px;padding:9px 11px;border:1px solid rgba(255,255,255,.08);border-radius:10px;font-size:11px;color:#aeb9c7}.scannerStats{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:8px}.scannerStats>div{padding:9px;border:1px solid rgba(255,255,255,.07);border-radius:10px;background:rgba(255,255,255,.025)}.scannerStats small{display:block;color:#778598;font-size:9px}.scannerStats b{display:block;margin-top:3px}.scannerList{display:grid;gap:6px;margin-top:8px}.scannerRow{display:grid;grid-template-columns:1.1fr 1fr 1fr 1.7fr;gap:8px;align-items:center;padding:9px 10px;border:1px solid rgba(255,255,255,.07);border-radius:10px;background:rgba(255,255,255,.02)}.scannerRow span{display:block;color:#8d9aaa;font-size:10px;margin-top:2px}.scannerReason{font-size:10px;color:#aeb9c7}@media(max-width:700px){.scannerHead{align-items:flex-start}.scannerStats{grid-template-columns:repeat(2,1fr)}.scannerRow{grid-template-columns:1fr 1fr}.scannerReason{grid-column:1/-1}}
+
+/* V6.10 auto market rotation */
+#autoRotationStatus{margin-top:7px;padding:8px 10px;border:1px solid rgba(255,255,255,.08);border-radius:9px;background:rgba(255,255,255,.02)}
+/* V6.09 regime + entry quality */
+.scannerReview{display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:7px;margin-top:8px}.scannerReview>div{padding:9px;border:1px solid #173149;border-radius:10px;background:#08131e}.scannerReview small{display:block;color:#71879c;font-size:8px}.scannerReview b{display:block;margin-top:4px;font-size:11px}.scannerReview span{display:block;margin-top:3px;color:#8296a9;font-size:8px;line-height:1.4}.scannerReason b{font-size:10px}.scannerReason span{color:#8296a9;font-size:9px}
+@media(max-width:700px){.scannerReview{grid-template-columns:1fr 1fr}.scannerReview>div:last-child{grid-column:1/-1}}
+
+/* V6.18.2 CLEAN MOBILE FOLDERS */
+.folderShell{display:grid;gap:7px;margin:8px 0}
+.cleanFolder{border:1px solid #202b3a;border-radius:11px;background:linear-gradient(180deg,#0b1118,#070b10);overflow:hidden;box-shadow:0 8px 22px rgba(0,0,0,.16)}
+.cleanFolderHead{width:100%;min-height:42px;padding:9px 11px;border:0;background:transparent;color:#edf2f7;display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;font:800 10px Inter,system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase}
+.cleanFolderHead:hover{background:rgba(255,255,255,.025)}
+.cleanFolderHead .folderLeft{display:flex;align-items:center;gap:8px;min-width:0}
+.cleanFolderHead .folderIcon{font-size:13px;letter-spacing:0}
+.cleanFolderHead .folderMeta{font-size:8px;font-weight:500;letter-spacing:.04em;color:#77869a;text-transform:none;white-space:nowrap}
+.cleanFolderHead .folderChevron{font-size:10px;color:var(--gold);transition:transform .18s ease}
+.cleanFolder.open>.cleanFolderHead{border-bottom:1px solid #202b3a}
+.cleanFolder.open>.cleanFolderHead .folderChevron{transform:rotate(180deg)}
+.cleanFolderBody{display:none;padding:7px}
+.cleanFolder.open>.cleanFolderBody{display:grid;gap:7px}
+.cleanFolderBody>.sec,.cleanFolderBody>.signalExplanation,.cleanFolderBody>.aiCard{margin:0!important}
+.cleanFolderBody>.signalExplanation{border-radius:9px}
+#cleanSignalFolders{display:grid;gap:7px;margin-top:8px}
+#cleanSignalFolders .cleanFolderBody{padding:6px}
+#cleanSignalFolders .cleanFolderBody .aiCard{padding:9px}
+#cleanSideTop{display:grid;gap:7px}
+#cleanSideTop>.cleanFolder{margin:0}
+.side>.cleanFolder{margin-bottom:7px}
+#cleanSideTop .signalDropV4{margin:0;border-radius:0;border:0;box-shadow:none}
+#cleanSideTop .signalDropV4>.signalDropHead{border-radius:0}
+.cleanFolder .signalDropV4{background:transparent!important}
+@media(max-width:980px){
+  .grid{display:grid;grid-template-columns:1fr!important}
+  .side{order:2;border-left:0;border-top:1px solid rgba(226,189,114,.08)}
+}
+@media(max-width:600px){
+  .cleanFolderHead{min-height:44px;padding:10px}
+  .cleanFolderBody{padding:6px}
+  #cleanSideTop{gap:6px}
+  .side{padding:7px!important}
+  .side .sec{margin:0!important}
+  .side .aiCard{margin:0!important}
+  .side .signalExplanation{margin:0!important}
+}
+/* Keep the chart + primary controls visually separate from the long module library. */
+.workspace>.chartStage{position:relative}
+.workspace>.grid{min-width:0}
+.workspace>.grid>main{min-width:0}
+
 </style>
 </body></html>

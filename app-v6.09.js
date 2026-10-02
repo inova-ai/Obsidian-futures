@@ -81,7 +81,7 @@ let lastAutoSignalKey=localStorage.getItem('obsidian_auto_last_signal')||null;
 let SHADOW_ENABLED=localStorage.getItem('obsidian_shadow_mode')==='1';
 let SHADOW_ROWS=(()=>{try{return JSON.parse(localStorage.getItem('obsidian_shadow_rows')||'[]')}catch{return []}})();
 
-const STRATEGY_VERSION='6.18.0';
+const STRATEGY_VERSION='6.08.0';
 const STRATEGY_FREEZE_KEY='obsidian_strategy_freeze_v585';
 let STRATEGY_FREEZE=(()=>{try{return JSON.parse(localStorage.getItem(STRATEGY_FREEZE_KEY)||'null')}catch{return null}})();
 let PAPER_ADAPTIVE_RISK=localStorage.getItem('obsidian_paper_adaptive_risk_v579')!=='0';
@@ -231,7 +231,6 @@ function paperResolveClosedCandle(c){
   const hi=Number(c.h),lo=Number(c.l); let reason=null,exit=null;
   if(p.side==='BUY'){const hitSL=lo<=p.sl,hitTP=hi>=p.tp; if(hitSL){reason='SL';exit=p.sl}else if(hitTP){reason='TP';exit=p.tp}}
   else {const hitSL=hi>=p.sl,hitTP=lo<=p.tp; if(hitSL){reason='SL';exit=p.sl}else if(hitTP){reason='TP';exit=p.tp}}
-  if(!reason)v614ManagePaperPosition(c);
   p.bars=Number(p.bars||0)+1;
   if(!reason && p.bars>=p.maxBars){reason='TIMEOUT';exit=Number(c.c)}
   if(reason)paperClosePosition(c,reason,exit); else {PAPER.equity=PAPER.balance;paperPersist()}
@@ -247,45 +246,8 @@ function paperTryEnterAtOpen(c){
   if(!Number.isFinite(entry)||!Number.isFinite(stopDist)||stopDist<=0){PAPER.pending=null;paperPersist();return}
   const riskUsd=PAPER.balance*riskPct; const riskQty=riskUsd/stopDist; const maxQty=(PAPER.balance*maxLev)/Math.max(entry,1); const qty=Math.min(riskQty,maxQty);
   if(!(qty>0)){PAPER.pending=null;paperPersist();return}
-  PAPER.position={side:q.side,entry,sl,tp,initialSl:sl,qty,riskUsd:qty*stopDist,fee,slip,bars:0,maxBars,signalTs:q.signalTs,signalScore:q.score,decisionScore:decision.score,regime:decision?.regime?.current?.label||decision?.regime?.currentKey||'UNKNOWN',openedTs:Date.now(),breakEvenArmed:false,trailing:false,bestR:0}; PAPER.pending=null; PAPER.lastCandleTs=Number(c.t); PAPER.equity=PAPER.balance; paperPersist(); renderPaperTrading();
+  PAPER.position={side:q.side,entry,sl,tp,qty,riskUsd:qty*stopDist,fee,slip,bars:0,maxBars,signalTs:q.signalTs,signalScore:q.score,decisionScore:decision.score,regime:decision?.regime?.current?.label||decision?.regime?.currentKey||'UNKNOWN',openedTs:Date.now()}; PAPER.pending=null; PAPER.lastCandleTs=Number(c.t); PAPER.equity=PAPER.balance; paperPersist(); renderPaperTrading();
 }
-// ===== V6.18 POSITION MANAGER 2.0 (PAPER SAFE) =====
-const POSITION_MANAGER_KEY='obsidian_position_manager_v614';
-let POSITION_MANAGER=(()=>{try{return JSON.parse(localStorage.getItem(POSITION_MANAGER_KEY)||'null')}catch{return null}})()||{breakEvenR:1.0,trailStartR:1.5,trailAtrMult:1.8,enabled:true};
-function v614PersistManager(){try{localStorage.setItem(POSITION_MANAGER_KEY,JSON.stringify(POSITION_MANAGER))}catch{}}
-function v614ManagePaperPosition(c){
-  const p=PAPER?.position;if(!p||!c||!POSITION_MANAGER.enabled)return {changed:false,status:'MANAGER NONAKTIF'};
-  const entry=Number(p.entry), risk=Math.abs(entry-Number(p.initialSl||p.sl)); if(!(entry>0&&risk>0))return {changed:false,status:'RISIKO AWAL TIDAK VALID'};
-  const side=p.side==='BUY'?1:-1, high=Number(c.h),low=Number(c.l),close=Number(c.c);
-  const favorable=side>0?high-entry:entry-low;
-  const r=favorable/risk;
-  p.bestR=Math.max(Number(p.bestR||0),r);
-  let changed=false;
-  if(!p.breakEvenArmed && r>=Number(POSITION_MANAGER.breakEvenR||1)){
-    const be=entry*(side>0?1.0002:0.9998);
-    if((side>0&&be>Number(p.sl))||(side<0&&be<Number(p.sl))){p.sl=be;p.breakEvenArmed=true;changed=true;}
-  }
-  if(r>=Number(POSITION_MANAGER.trailStartR||1.5)){
-    const atrs=S.c?.slice(-20)||[];
-    const trs=atrs.map(x=>Math.max(Number(x.h)-Number(x.l),Math.abs(Number(x.h)-Number(x.c||x.h)),Math.abs(Number(x.l)-Number(x.c||x.l)))).filter(Number.isFinite);
-    const atr=trs.length?trs.reduce((a,b)=>a+b,0)/trs.length:0;
-    if(atr>0){
-      const dist=atr*Math.max(.5,Number(POSITION_MANAGER.trailAtrMult||1.8));
-      const candidate=side>0?close-dist:close+dist;
-      if((side>0&&candidate>Number(p.sl))||(side<0&&candidate<Number(p.sl))){p.sl=candidate;p.trailing=true;changed=true;}
-    }
-  }
-  if(changed){p.managerAt=Date.now();p.managerNote=p.trailing?'TRAILING AKTIF':p.breakEvenArmed?'BREAK-EVEN AKTIF':'TERKELOLA';paperPersist();}
-  return {changed,status:p.trailing?'TRAILING AKTIF':p.breakEvenArmed?'BREAK-EVEN AKTIF':'MENUNGGU '+Number(POSITION_MANAGER.breakEvenR||1)+'R',r,bestR:p.bestR};
-}
-function renderV614PositionManager(){
-  const h=$('positionManagerV614');if(!h)return;
-  const p=PAPER?.position, st=p?{changed:false,status:p.trailing?'TRAILING AKTIF':p.breakEvenArmed?'BREAK-EVEN AKTIF':'MENUNGGU KONDISI'}:{status:'TIDAK ADA POSISI PAPER'};
-  h.innerHTML=`<div class="fdSectionHead"><div><span class="label">V6.18 POSITION MANAGER 2.0</span><b>Break-even + trailing + exit disiplin</b></div><button class="btn ${POSITION_MANAGER.enabled?'active':''}" id="pm614Toggle">MANAJEMEN: ${POSITION_MANAGER.enabled?'ON':'OFF'}</button></div><div class="scannerStats"><div><small>POSISI PAPER</small><b>${p?p.side:'—'}</b></div><div><small>STATUS</small><b>${st.status}</b></div><div><small>R TERBAIK</small><b>${p?Number(p.bestR||0).toFixed(2):'—'}</b></div><div><small>STOP SAAT INI</small><b>${p?fmtIDR(p.sl):'—'}</b></div></div><div class="g3" style="margin-top:8px"><label class="field">Aktif BE (R)<input id="pmBeR" type="number" min="0.5" max="3" step="0.1" value="${POSITION_MANAGER.breakEvenR}"></label><label class="field">Mulai trailing (R)<input id="pmTrailR" type="number" min="1" max="5" step="0.1" value="${POSITION_MANAGER.trailStartR}"></label><label class="field">Jarak trailing ATR<input id="pmAtr" type="number" min="0.5" max="5" step="0.1" value="${POSITION_MANAGER.trailAtrMult}"></label></div><div class="note" style="margin-top:8px">Paper Manager hanya mengelola simulasi. Ia tidak mengirim order LIVE dan tidak menjamin profit. Untuk candle yang menyentuh SL dan TP sekaligus, simulator tetap memakai aturan konservatif SL lebih dulu.</div>`;
-  $('pm614Toggle')?.addEventListener('click',()=>{POSITION_MANAGER.enabled=!POSITION_MANAGER.enabled;v614PersistManager();renderV614PositionManager()});
-  ['pmBeR','pmTrailR','pmAtr'].forEach(id=>$(id)?.addEventListener('change',()=>{POSITION_MANAGER.breakEvenR=Math.max(.5,Number($('pmBeR')?.value)||1);POSITION_MANAGER.trailStartR=Math.max(1,Number($('pmTrailR')?.value)||1.5);POSITION_MANAGER.trailAtrMult=Math.max(.5,Number($('pmAtr')?.value)||1.8);v614PersistManager();renderV614PositionManager()}));
-}
-
 function paperQueueFromClosedCandle(c){
   if(!PAPER_ENABLED||!c||PAPER.position)return;
   if(Number(PAPER.lastCandleTs)===Number(c.t))return;
@@ -3578,18 +3540,8 @@ function setDashboardView(tab){
 
 
 // ===== V6.09 REGIME + ENTRY QUALITY + SMART RISK =====
-let SCANNER_SYMBOLS=['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','XRPUSDT','DOGEUSDT','ADAUSDT','AVAXUSDT','LINKUSDT','LTCUSDT','DOTUSDT','TRXUSDT'];
-let SCANNER_MARKET_META=new Map();
-const DYNAMIC_SCANNER_LIMIT=20;
-const DYNAMIC_MIN_QUOTE_VOLUME=1500000;
-const DYNAMIC_MAX_SPREAD_PCT=0.35;
-const DYNAMIC_MAX_FUNDING_ABS=0.0008;
-let SCANNER_BUSY=false,SCANNER_TIMER=null,SCANNER_ROWS=[],SCANNER_LAST_SCAN=0,SCANNER_METRICS=new Map();
-let AUTO_ROTATION=localStorage.getItem('obsidian_auto_rotation')!=='0';
-let AUTO_ROTATE_BUSY=false;
-let PAPER_AUTO_ROTATION=localStorage.getItem('obsidian_paper_auto_rotation')==='1';
-const AUTO_ROTATE_MIN_QUALITY=82;
-const AUTO_ROTATE_SWITCH_MARGIN=8;
+const SCANNER_SYMBOLS=['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','XRPUSDT','DOGEUSDT','ADAUSDT','AVAXUSDT','LINKUSDT','LTCUSDT','DOTUSDT','TRXUSDT'];
+let SCANNER_BUSY=false,SCANNER_TIMER=null,SCANNER_ROWS=[],SCANNER_LAST_SCAN=0;
 function scannerNum(v,d=0){const n=Number(v);return Number.isFinite(n)?n:d}
 function scannerRegime(c){
   if(!Array.isArray(c)||c.length<60)return {key:'DATA',label:'DATA BELUM CUKUP',score:0};
@@ -3622,214 +3574,24 @@ function scannerScore(c){
   const rrTarget=regime.key==='TREND_UP'||regime.key==='TREND_DOWN'?2.0:1.5;
   return {score,side,reason:reasons.slice(0,3).join(' · '),trend:bull?'NAIK':bear?'TURUN':'CAMPURAN',rsi:rrsi,adx:aa,vol,atrPct,regime,quality,entry,riskPct,rr:rrTarget};
 }
-async function loadDynamicFuturesMarkets(){
-  try{
-    const r=await fetchWithTimeout('/api/futures-markets',{cache:'no-store'},8000);
-    const d=await r.json().catch(()=>null);
-    if(!r.ok||!d?.symbols?.length)throw Error(d?.error||'Daftar market Futures kosong');
-    const eligible=d.symbols.filter(x=>Number(x.quoteVolume||0)>=DYNAMIC_MIN_QUOTE_VOLUME);
-    const must=['BTCUSDT','ETHUSDT','SOLUSDT'];
-    const ranked=[...eligible].sort((a,b)=>{
-      const aScore=Math.min(Math.abs(Number(a.priceChangePercent||0)),35)*1.1+Math.log10(Number(a.quoteVolume||1))*3;
-      const bScore=Math.min(Math.abs(Number(b.priceChangePercent||0)),35)*1.1+Math.log10(Number(b.quoteVolume||1))*3;
-      return bScore-aScore;
-    });
-    const merged=new Map(); [...must.map(s=>eligible.find(x=>x.symbol===s)).filter(Boolean),...ranked].forEach(x=>x&&merged.set(x.symbol,x));
-    SCANNER_SYMBOLS=[...merged.values()].slice(0,DYNAMIC_SCANNER_LIMIT).map(x=>x.symbol);
-    SCANNER_MARKET_META=new Map([...merged.values()].map(x=>[x.symbol,x]));
-    return {ok:true,total:d.count||d.symbols.length,selected:SCANNER_SYMBOLS.length,updatedAt:d.updatedAt};
-  }catch(e){
-    SCANNER_MARKET_META=new Map();
-    return {ok:false,error:e?.message||'Gagal mengambil daftar market dinamis'};
-  }
-}
 async function scanOneSymbol(symbol){
-  try{
-    const md=await fetchMarketKlines(symbol,'15m',180),rows=(md.rows||[]).map(x=>({t:+x[0],o:+x[1],h:+x[2],l:+x[3],c:+x[4],v:+x[5]})).filter(x=>[x.t,x.o,x.h,x.l,x.c,x.v].every(Number.isFinite));
-    const x=scannerScore(rows),last=rows.at(-1)?.c||0,meta=SCANNER_MARKET_META.get(symbol)||{},chg=Number(meta.priceChangePercent||0),liq=Number(meta.quoteVolume||0);
-    const m=SCANNER_METRICS.get(symbol)||{},spreadPct=Number(m.spreadPct||0),funding=Number(m.fundingRate||0),oi=Number(m.openInterest||0);
-    const recent=rows.slice(-4),recentMove=recent.length>=2?((recent.at(-1).c-recent[0].o)/(recent[0].o||1)*100):0;
-    const pump=Math.abs(chg)>=35||Math.abs(recentMove)>=6,fundingExtreme=Math.abs(funding)>=DYNAMIC_MAX_FUNDING_ABS,liquidityOk=liq>=DYNAMIC_MIN_QUOTE_VOLUME,spreadOk=!spreadPct||spreadPct<=DYNAMIC_MAX_SPREAD_PCT;
-    let quality=x.quality;if(pump)quality=Math.max(0,quality-14);if(fundingExtreme)quality=Math.max(0,quality-8);if(!spreadOk)quality=Math.max(0,quality-10);if(!liquidityOk)quality=0;
-    const entry=quality>=78&&x.score>=60&&x.side!=='WAIT'&&!pump&&!fundingExtreme&&spreadOk&&liquidityOk?'SIAP DITINJAU':quality>=62&&x.side!=='WAIT'&&!pump&&liquidityOk?'WATCH':'TUNGGU';
-    const reasons=[x.reason];if(pump)reasons.push('gerak ekstrem · hindari mengejar');if(fundingExtreme)reasons.push(`funding ekstrem ${(funding*100).toFixed(3)}%`);if(spreadPct)reasons.push(`spread ${spreadPct.toFixed(3)}%`);
-    if(oi)reasons.push(`OI ${oi>=1000000?(oi/1000000).toFixed(1)+'M':oi.toFixed(0)}`);
-    return {symbol,price:last,source:md.source||'market',change24h:chg,quoteVolume:liq,extreme:pump,liquidityOk,spreadPct,fundingRate:funding,openInterest:oi,recentMove,quality,entry,reason:reasons.filter(Boolean).slice(0,4).join(' · '),...x,ok:true};
-  }catch(e){return {symbol,ok:false,error:e?.message||'Gagal mengambil data',score:0,side:'WAIT',quality:0,entry:'ERROR'};}
+  try{const md=await fetchMarketKlines(symbol,'15m',180),rows=(md.rows||[]).map(x=>({t:+x[0],o:+x[1],h:+x[2],l:+x[3],c:+x[4],v:+x[5]})).filter(x=>[x.t,x.o,x.h,x.l,x.c,x.v].every(Number.isFinite));const x=scannerScore(rows),last=rows.at(-1)?.c||0;return {symbol,price:last,source:md.source||'market',...x,ok:true};}
+  catch(e){return {symbol,ok:false,error:e?.message||'Gagal mengambil data',score:0,side:'WAIT',quality:0,entry:'ERROR'};}
 }
 function scannerRiskText(x){return x.entry==='SIAP DITINJAU'?`Risiko simulasi ${x.riskPct.toFixed(2)}% · target R/R ${x.rr.toFixed(1)}R`:'Belum layak untuk risiko entry';}
-function setRotationStatus(text,cls='wait'){
-  const el=$('autoRotationStatus');
-  if(el){el.textContent=text;el.className='note '+cls;}
-}
-async function switchMarketForAuto(symbol){
-  const next=String(symbol||'').toUpperCase();
-  if(!SCANNER_SYMBOLS.includes(next)||next===S.symbol)return false;
-  if(AUTO_ROTATE_BUSY)return false;
-  if(S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0){setRotationStatus('ROTASI DITAHAN · masih ada posisi terbuka pada '+S.symbol,'wait');return false;}
-  AUTO_ROTATE_BUSY=true;
-  try{
-    setRotationStatus(`ROTASI OTOMATIS · ${S.symbol.replace('USDT','/USDT')} → ${next.replace('USDT','/USDT')} · memuat chart…`,'wait');
-    S.symbol=next;
-    const sel=$('symbol');if(sel){if(![...sel.options].some(o=>o.value===next)){const o=document.createElement('option');o.value=next;o.textContent=next;sel.appendChild(o)}sel.value=next;}
-    $('pair').textContent=next;
-    await load();
-    setRotationStatus(`MARKET AKTIF · ${next.replace('USDT','/USDT')} · menunggu konfirmasi entry`,'good');
-    return true;
-  }catch(e){setRotationStatus(`ROTASI GAGAL · ${e?.message||'gagal memuat market'}`,'bad');return false}
-  finally{AUTO_ROTATE_BUSY=false;}
-}
-async function confirmMultiTimeframe(symbol,side){
-  const target=String(symbol||'').toUpperCase();
-  const checks=[];
-  for(const tf of ['5m','15m','1h']){
-    try{
-      const md=await fetchMarketKlines(target,tf,120);
-      const rows=(md.rows||[]).map(x=>({t:+x[0],o:+x[1],h:+x[2],l:+x[3],c:+x[4],v:+x[5]})).filter(x=>[x.t,x.o,x.h,x.l,x.c,x.v].every(Number.isFinite));
-      if(rows.length<60){checks.push({tf,side:'WAIT',ok:false});continue;}
-      const q=scannerScore(rows); checks.push({tf,side:q.side,quality:q.quality,ok:q.side===side});
-    }catch{checks.push({tf,side:'WAIT',ok:false});}
-  }
-  return {aligned:checks.filter(x=>x.ok).length>=2&&checks.some(x=>x.tf==='15m'&&x.ok),checks};
-}
-async function autoRotateAndReview(best){
-  const paperRun=!!(PAPER_ENGINE.enabled&&PAPER_ENABLED);
-  if((!paperRun&&(!AUTO_ENTRY||!AUTO_ROTATION))||MANUAL_ENTRY_STOP||autoBusy||autoProtectBusy||!best||best.quality<AUTO_ROTATE_MIN_QUALITY)return;
-  if(best.symbol!==S.symbol){
-    const current=SCANNER_ROWS.find(x=>x.symbol===S.symbol);
-    const currentQ=Number(current?.quality||0);
-    if(current&&currentQ>=best.quality-AUTO_ROTATE_SWITCH_MARGIN)return;
-    const changed=await switchMarketForAuto(best.symbol);
-    if(!changed)return;
-  }
-  if(S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0)return;
-  try{
-    const anchor=S.c?.at(-2)||S.c?.at(-1);
-    const row=anchor?freezeNextCandlePrediction(anchor):null;
-    if(!row||row.side==='WAIT'){
-      setRotationStatus(`MARKET ${S.symbol.replace('USDT','/USDT')} terpilih · sinyal belum cukup kuat`,'wait');
-      return;
-    }
-    if(row.side!==best.side){setRotationStatus(`MARKET ${S.symbol.replace('USDT','/USDT')} terpilih · arah scanner ${best.side}, sinyal aktif ${row.side} · menunggu sinkron`,'wait');return;}
-    setRotationStatus(`MARKET TERPILIH · ${S.symbol.replace('USDT','/USDT')} · ${row.side} · konfirmasi 5m/15m/1h…`,'wait');
-    const mtf=await confirmMultiTimeframe(S.symbol,row.side);
-    const mtfText=mtf.checks.map(x=>`${x.tf}:${x.side}`).join(' · ');
-    if(!mtf.aligned){setRotationStatus(`ENTRY DITAHAN · konfirmasi multi-timeframe belum selaras · ${mtfText}`,'wait');return;}
-    const timing=SMART_ENTRY_TIMING?v613Timing(S.c,row.side):{ok:true,reason:'Timing guard nonaktif'};
-    if(!timing.ok){setRotationStatus(`ENTRY DITAHAN · ${timing.label} · ${timing.reason}`,'wait');return;}
-    const corr=v613CorrelationGuard(best);
-    if(!corr.ok){setRotationStatus(`ENTRY DITAHAN · ${corr.reason}`,'wait');return;}
-    if((PAPER_AUTO_ROTATION||paperRun) && PAPER_ENABLED){
-      const decision=buildUnifiedDecision(LAST_LIVE_FINAL||{});
-      const safety=typeof buildKillSwitch==='function'?buildKillSwitch():null;
-      if(decision?.state==='READY'&&!safety?.hardStop&&row.riskPlan?.valid){
-        PAPER.pending={symbol:S.symbol,tf:S.tf,signalTs:Number(row.signalTs||Date.now()),side:row.side,score:Number(row.score||0),pred:{...row},plan:{...row.riskPlan},decision:{state:decision.state,score:Number(decision.score||0),reasons:[...(decision.reasons||[])]},rotation:true,mtf:mtf.checks};
-        paperPersist(); setRotationStatus(`PAPER AUTO · ${S.symbol.replace('USDT','/USDT')} ${row.side} · menunggu candle berikutnya untuk simulasi entry · ${mtfText}`,'good');
-        if(typeof renderPaperTrading==='function')renderPaperTrading(); return;
-      }
-      setRotationStatus(`PAPER AUTO · entry ditahan oleh Decision/Safety Gate · ${mtfText}`,'wait');return;
-    }
-    setRotationStatus(`MARKET TERPILIH · ${S.symbol.replace('USDT','/USDT')} · ${row.side} · timing + korelasi lolos · verifikasi gerbang AUTO…`,'wait');
-    await scheduleAutoTrade(row);
-  }catch(e){setRotationStatus(`AUTO ROTASI · entry ditahan: ${e?.message||'konfirmasi gagal'}`,'wait');}
-}
 async function runMarketScanner(){
   const h=$('marketScannerV608');if(!h||SCANNER_BUSY)return;SCANNER_BUSY=true;h.dataset.loading='1';
   const btn=$('scannerRefresh');if(btn){btn.disabled=true;btn.textContent='MEMINDAI…'}
-  h.querySelector('.scannerStatus')?.replaceChildren(document.createTextNode('Mengambil market Futures dinamis + regime + kualitas entry…'));
-  const marketFeed=await loadDynamicFuturesMarkets();
-  h.querySelector('.scannerStatus')?.replaceChildren(document.createTextNode(marketFeed.ok?`Memindai ${SCANNER_SYMBOLS.length} market Futures + funding/OI/liquidity…`:`Daftar market dinamis gagal · memakai daftar cadangan…`));
-  try{const mr=await fetchWithTimeout('/api/futures-metrics?symbols='+encodeURIComponent(SCANNER_SYMBOLS.join(',')),{cache:'no-store'},9000);const md=await mr.json().catch(()=>null);SCANNER_METRICS=new Map((md?.metrics||[]).map(x=>[x.symbol,x]));}catch{SCANNER_METRICS=new Map();}
-  const out=await Promise.all(SCANNER_SYMBOLS.map(scanOneSymbol));SCANNER_ROWS=out.filter(x=>x.ok).sort((a,b)=>(b.quality-a.quality)||(b.score-a.score)||(Math.abs(b.change24h||0)-Math.abs(a.change24h||0)));
+  h.querySelector('.scannerStatus')?.replaceChildren(document.createTextNode('Memindai market + regime + kualitas entry…'));
+  const out=await Promise.all(SCANNER_SYMBOLS.map(scanOneSymbol));SCANNER_ROWS=out.filter(x=>x.ok).sort((a,b)=>(b.quality-b.quality)||(b.score-a.score));
   const candidates=SCANNER_ROWS.filter(x=>x.score>=55&&x.side!=='WAIT').slice(0,5);
-  const list=candidates.length?candidates.map((x,i)=>`<div class="scannerRow"><div><b>${i+1}. ${x.symbol.replace('USDT','/USDT')}</b><span>${x.side} · ${x.regime?.label||'—'}</span></div><div><b>${x.quality}/100</b><span>Teknikal ${x.score}/100 · OI ${x.openInterest?(x.openInterest>=1000000?(x.openInterest/1000000).toFixed(1)+'M':x.openInterest.toFixed(0)):'—'} · Funding ${x.fundingRate!=null?(x.fundingRate*100).toFixed(3)+'%':'—'}</span></div><div><b>${x.rsi==null?'—':x.rsi.toFixed(0)}</b><span>RSI · ADX ${x.adx==null?'—':x.adx.toFixed(0)} · 24j ${x.change24h==null?'—':(x.change24h>=0?'+':'')+x.change24h.toFixed(1)+'%'} · Spread ${x.spreadPct?x.spreadPct.toFixed(3)+'%':'—'}</span></div><div class="scannerReason"><b>${x.entry}</b> · ${x.reason}<br><span>${scannerRiskText(x)}</span></div></div>`).join(''):'<div class="note">Belum ada setup yang cukup berkualitas. Sistem tidak memaksa entry.</div>';
+  const list=candidates.length?candidates.map((x,i)=>`<div class="scannerRow"><div><b>${i+1}. ${x.symbol.replace('USDT','/USDT')}</b><span>${x.side} · ${x.regime?.label||'—'}</span></div><div><b>${x.quality}/100</b><span>Teknikal ${x.score}/100</span></div><div><b>${x.rsi==null?'—':x.rsi.toFixed(0)}</b><span>RSI · ADX ${x.adx==null?'—':x.adx.toFixed(0)}</span></div><div class="scannerReason"><b>${x.entry}</b> · ${x.reason}<br><span>${scannerRiskText(x)}</span></div></div>`).join(''):'<div class="note">Belum ada setup yang cukup berkualitas. Sistem tidak memaksa entry.</div>';
   const top=SCANNER_ROWS.slice(0,6).map(x=>`${x.symbol} ${x.side} ${x.quality}`).join(' · '), best=SCANNER_ROWS[0];
-  h.innerHTML=`<div class="scannerHead"><div><span class="label">V6.18 DYNAMIC FUTURES SCANNER</span><b>Mencari market Futures aktif lalu memilih setup terbaik</b><div class="scannerStatus">${candidates.length} kandidat · diperbarui ${new Date().toLocaleTimeString()}</div></div><div class="g2"><button class="btn active" id="scannerRefresh">SCAN SEKARANG</button><button class="btn ${AUTO_ROTATION?'long':''}" id="autoRotationBtn">ROTASI AUTO: ${AUTO_ROTATION?'ON':'OFF'}</button><button class="btn ${PAPER_AUTO_ROTATION?'active':''}" id="paperAutoRotationBtn">PAPER AUTO: ${PAPER_AUTO_ROTATION?'ON':'OFF'}</button></div></div><div class="scannerSafe">🛡 <b>Rotasi otomatis hanya aktif saat AUTO juga ON.</b> Sistem tidak berpindah market jika masih ada posisi terbuka. Entry tetap melewati semua safety gate.</div><div id="autoRotationStatus" class="note wait">${PAPER_ENGINE.enabled?'PAPER AUTO sedang mencari peluang secara aman…':AUTO_ENTRY&&AUTO_ROTATION?'AUTO LIVE aktif · verifikasi semua gerbang sebelum order':'PAPER siap · aktifkan PAPER AUTO ENGINE untuk uji otomatis'}</div><div class="scannerStats"><div><small>MARKET DIPINDAI</small><b>${SCANNER_ROWS.length}/${SCANNER_SYMBOLS.length}</b><span>dinamis</span></div><div><small>KANDIDAT</small><b>${candidates.length}</b></div><div><small>MARKET TERPILIH</small><b>${best?best.symbol.replace('USDT','/USDT'):'—'}</b></div><div><small>KUALITAS</small><b>${best?.quality||0}/100</b></div></div><div class="scannerList">${list}</div><div class="scannerReview"><div><small>KANDIDAT TERATAS</small><b>${best?best.symbol.replace('USDT','/USDT')+' · '+best.side:'—'}</b><span>${best?best.regime?.label+' · kualitas '+best.quality+'/100':'Belum ada kandidat'}</span></div><div><small>GATE</small><b>${best?.entry||'TUNGGU'}</b><span>${best?scannerRiskText(best):'Menunggu scan'}</span></div><div><small>ALASAN</small><b>${best?.reason||'—'}</b><span>Market dipilih berdasarkan ranking scan + likuiditas/funding/OI/spread; entry tetap diverifikasi ulang.</span></div></div><div class="note" style="margin-top:8px">Scanner memilih market secara dinamis berdasarkan likuiditas, pergerakan, funding, open interest, spread, dan kualitas setup. Kenaikan ekstrem tidak otomatis berarti BUY; entry tetap melewati MTF, timing, korelasi, dan safety gate. ${top||'Belum ada data.'}</div>`;
-  $('scannerRefresh')?.addEventListener('click',runMarketScanner);
-  $('autoRotationBtn')?.addEventListener('click',()=>{AUTO_ROTATION=!AUTO_ROTATION;localStorage.setItem('obsidian_auto_rotation',AUTO_ROTATION?'1':'0');runMarketScanner()});$('paperAutoRotationBtn')?.addEventListener('click',()=>{PAPER_AUTO_ROTATION=!PAPER_AUTO_ROTATION;localStorage.setItem('obsidian_paper_auto_rotation',PAPER_AUTO_ROTATION?'1':'0');runMarketScanner()});
+  h.innerHTML=`<div class="scannerHead"><div><span class="label">V6.09 MARKET SCANNER · REGIME + ENTRY QUALITY</span><b>Mencari peluang tanpa memaksa entry</b><div class="scannerStatus">${candidates.length} kandidat · diperbarui ${new Date().toLocaleTimeString()}</div></div><button class="btn active" id="scannerRefresh">SCAN SEKARANG</button></div><div class="scannerSafe">🛡 Scanner hanya memberi kandidat. <b>Tidak mengirim order dan tidak menjamin profit.</b> Risiko di bawah adalah simulasi untuk membantu review.</div><div class="scannerStats"><div><small>MARKET</small><b>${SCANNER_ROWS.length}/${SCANNER_SYMBOLS.length}</b></div><div><small>KANDIDAT</small><b>${candidates.length}</b></div><div><small>REGIME</small><b>${best?.regime?.label||'—'}</b></div><div><small>TF</small><b>15m</b></div></div><div class="scannerList">${list}</div><div class="scannerReview"><div><small>KANDIDAT TERATAS</small><b>${best?best.symbol.replace('USDT','/USDT')+' · '+best.side:'—'}</b><span>${best?best.regime?.label+' · kualitas '+best.quality+'/100':'Belum ada kandidat'}</span></div><div><small>GATE</small><b>${best?.entry||'TUNGGU'}</b><span>${best?scannerRiskText(best):'Menunggu scan'}</span></div><div><small>ALASAN</small><b>${best?.reason||'—'}</b><span>Periksa ulang sebelum keputusan manual/PAPER.</span></div></div><div class="note" style="margin-top:8px">Ranking berdasarkan kualitas setup saat scan, bukan prediksi atau jaminan hasil. ${top||'Belum ada data.'}</div>`;
   h.dataset.loading='0';SCANNER_BUSY=false;SCANNER_LAST_SCAN=Date.now();
-  if(AUTO_ENTRY&&AUTO_ROTATION&&best)await autoRotateAndReview(best);
-  clearTimeout(SCANNER_TIMER);SCANNER_TIMER=setTimeout(()=>{if(document.body.dataset.view==='dashboard')runMarketScanner()},180000);
+  $('scannerRefresh')?.addEventListener('click',runMarketScanner);clearTimeout(SCANNER_TIMER);SCANNER_TIMER=setTimeout(()=>{if(document.body.dataset.view==='dashboard')runMarketScanner()},180000);
 }
-function renderMarketScanner(){const h=$('marketScannerV608');if(!h)return;h.innerHTML=`<div class="scannerHead"><div><span class="label">V6.18 AUTO MARKET ROTATION</span><b>Scanner → pilih market → konfirmasi MTF → simulasi/entry</b><div class="scannerStatus">Siap memindai 12 market.</div></div><button class="btn active" id="scannerRefresh">SCAN SEKARANG</button></div><div class="scannerSafe">🛡 Rotasi otomatis tidak memaksa entry. AUTO harus ON, posisi harus kosong, dan seluruh safety gate harus lolos.</div>`;$('scannerRefresh')?.addEventListener('click',runMarketScanner);runMarketScanner();}
-
-
-// ===== V6.18 POSITION MANAGER 2.0 + SMART ENTRY TIMING + CORRELATION GUARD =====
-let SMART_ENTRY_TIMING=localStorage.getItem('obsidian_smart_entry_timing')!=='0';
-let CORRELATION_GUARD=localStorage.getItem('obsidian_correlation_guard')!=='0';
-function v613Timing(rows,side){
-  const a=Array.isArray(rows)?rows:[]; if(a.length<25)return {ok:false,label:'DATA BELUM CUKUP',reason:'Minimal 25 candle diperlukan'};
-  const c=a.at(-1), prev=a.at(-2);
-  const hi=Math.max(...a.slice(-20).map(x=>Number(x.h))), lo=Math.min(...a.slice(-20).map(x=>Number(x.l)));
-  const range=Math.max(hi-lo,1), pos=(Number(c.c)-lo)/range;
-  const candleRange=Math.max(Number(c.h)-Number(c.l),1e-9);
-  const body=Math.abs(Number(c.c)-Number(c.o))/candleRange;
-  const move=Math.abs(Number(c.c)-Number(prev.c))/Math.max(Number(prev.c),1)*100;
-  const chase=side==='BUY'?pos>0.94:pos<0.06, spike=body>0.82||move>2.2;
-  return {ok:!chase&&!spike,label:!chase&&!spike?'TIMING SEHAT':'TUNGGU TIMING',reason:chase?'Harga terlalu dekat ujung range — hindari mengejar candle.':spike?'Pergerakan candle terlalu ekstrem — tunggu stabilisasi.':'Harga tidak terlalu teregang.',rangePos:pos,body,move};
-}
-function v613CorrelationGuard(best){
-  if(!CORRELATION_GUARD||!best)return {ok:true,reason:'Guard nonaktif'};
-  const open= S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0;
-  if(open)return {ok:false,reason:'Masih ada posisi terbuka.'};
-  const sameSide=SCANNER_ROWS.filter(x=>x?.ok&&x.side===best.side&&Number(x.quality||0)>=70).length;
-  return {ok:true,reason:sameSide>=3?`Ada ${sameSide} market searah; sistem membatasi satu posisi.`:'Korelasi dalam batas pengujian.'};
-}
-function renderV613SmartEntry(){
-  const h=$('smartEntryV613');if(!h)return;
-  const rows=Array.isArray(SCANNER_ROWS)?SCANNER_ROWS.filter(x=>x?.ok).sort((a,b)=>(b.quality||0)-(a.quality||0)):[];
-  const best=rows[0]; const timing=best&&S.c?.length?v613Timing(S.c,best.side):null; const corr=v613CorrelationGuard(best);
-  h.innerHTML=`<div class="fdSectionHead"><div><span class="label">V6.18 SMART ENTRY</span><b>Timing + korelasi sebelum entry</b></div><div class="g2"><button class="btn ${SMART_ENTRY_TIMING?'active':''}" id="smartTimingBtn">TIMING: ${SMART_ENTRY_TIMING?'ON':'OFF'}</button><button class="btn ${CORRELATION_GUARD?'active':''}" id="corrGuardBtn">KORELASI: ${CORRELATION_GUARD?'ON':'OFF'}</button></div></div><div class="scannerStats"><div><small>MARKET TERATAS</small><b>${best?best.symbol.replace('USDT','/USDT'):'—'}</b></div><div><small>ARAH</small><b>${best?.side||'WAIT'}</b></div><div><small>TIMING</small><b>${timing?.label||'—'}</b></div><div><small>KORELASI</small><b>${corr.ok?'CLEAR':'BLOCK'}</b></div></div><div class="note" style="margin-top:8px">${timing?.reason||'Menunggu kandidat scanner.'} ${corr.reason||''}</div><div class="note" style="margin-top:6px">V6.13 hanya menahan/menyaring entry. Tidak menjamin profit dan tidak mengaktifkan order LIVE.</div>`;
-  h.querySelector('#smartTimingBtn')?.addEventListener('click',()=>{SMART_ENTRY_TIMING=!SMART_ENTRY_TIMING;localStorage.setItem('obsidian_smart_entry_timing',SMART_ENTRY_TIMING?'1':'0');renderV613SmartEntry()});
-  h.querySelector('#corrGuardBtn')?.addEventListener('click',()=>{CORRELATION_GUARD=!CORRELATION_GUARD;localStorage.setItem('obsidian_correlation_guard',CORRELATION_GUARD?'1':'0');renderV613SmartEntry()});
-}
-
-// ===== V6.12 ADAPTIVE LEARNING + TRADE REPLAY + NO-TRADE INTELLIGENCE =====
-const ADAPTIVE_LAB_KEY='obsidian_adaptive_lab_v612';
-function v612PaperTrades(){return Array.isArray(PAPER?.trades)?PAPER.trades:[]}
-function v612GroupStats(rows,keyFn){const m=new Map();for(const r of rows){const k=keyFn(r)||'UNKNOWN';let x=m.get(k);if(!x)m.set(k,x={key:k,n:0,w:0,net:0,r:0,loss:0});x.n++;const pnl=Number(r.netPnl||0),rr=Number(r.realizedR||0);x.net+=Number.isFinite(pnl)?pnl:0;x.r+=Number.isFinite(rr)?rr:0;if(pnl>=0)x.w++;else x.loss++;}return [...m.values()].map(x=>({...x,winRate:x.n?x.w/x.n*100:0,expectancy:x.n?x.r/x.n:0})).sort((a,b)=>b.expectancy-a.expectancy)}
-function v612AdaptiveSnapshot(){const rows=v612PaperTrades();const bySymbol=v612GroupStats(rows,r=>r.symbol);const byRegime=v612GroupStats(rows,r=>r.regime);const bySide=v612GroupStats(rows,r=>r.side);const wins=rows.filter(r=>Number(r.netPnl||0)>=0).length;const net=rows.reduce((a,r)=>a+Number(r.netPnl||0),0);const expectancy=rows.length?rows.reduce((a,r)=>a+Number(r.realizedR||0),0)/rows.length:0;return {samples:rows.length,wins,net,expectancy,bySymbol,byRegime,bySide,updatedAt:Date.now()}}
-function v612NoTrade(){const d=LAST_LIVE_FINAL||{};const reasons=[];if(d.state==='BLOCK')reasons.push('Keputusan utama memblokir entry');else if(d.state!=='READY')reasons.push('Keputusan utama belum READY');if(Number(d.score||0)<AUTO_CONFIRM_SCORE)reasons.push(`Skor keputusan ${Number(d.score||0)}/100 di bawah batas ${AUTO_CONFIRM_SCORE}`);if(d.capital&&d.capital!=='CLEAR')reasons.push('Perlindungan modal tidak CLEAR');if(d.dataQuality&&d.dataQuality!=='HEALTHY')reasons.push(`Kualitas data ${d.dataQuality}`);if(S.kill)reasons.push('KILL SWITCH aktif');if(S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0)reasons.push('Masih ada posisi terbuka');if(!reasons.length)reasons.push('Tidak ada blocker utama dari snapshot saat ini');return {state:d.state||'WAIT',reasons,recommended:reasons[0]}}
-function v612ReplayRows(){return v612PaperTrades().slice(-8).reverse()}
-function renderAdaptiveLearningV612(){const h=$('adaptiveLearningV612');if(!h)return;const x=v612AdaptiveSnapshot(),nt=v612NoTrade(),replay=v612ReplayRows(),top=x.bySymbol.slice(0,4);h.innerHTML=`<div class="fdSectionHead"><div><span class="label">V6.12 ADAPTIVE LEARNING</span><b>Belajar dari PAPER tanpa mengubah aturan secara diam-diam</b></div><button class="btn" id="v612Refresh">PERBARUI</button></div><div class="scannerStats"><div><small>SAMPEL PAPER</small><b>${x.samples}</b><span>${x.samples>=20?'cukup untuk review awal':'masih mengumpulkan'}</span></div><div><small>WIN RATE</small><b>${x.samples?(x.wins/x.samples*100).toFixed(0):'0'}%</b><span>berdasarkan paper tertutup</span></div><div><small>EXPECTANCY</small><b>${x.expectancy.toFixed(2)}R</b><span>hasil rata-rata</span></div><div><small>HASIL BERSIH</small><b>${x.net.toFixed(2)}</b><span>mata uang paper</span></div></div><div class="fdGrid" style="margin-top:8px"><article class="fdCard"><div class="fdCardTop"><span class="fdIcon">NO</span><span class="fdIndex">01</span></div><h3>KENAPA TIDAK ENTRY?</h3><p>${nt.reasons.slice(0,4).map(v=>`• ${v}`).join('<br>')}</p><div class="fdCardFoot"><span>${nt.state}</span><span>${nt.recommended}</span></div></article><article class="fdCard"><div class="fdCardTop"><span class="fdIcon">RPL</span><span class="fdIndex">02</span></div><h3>TRADE REPLAY</h3><p>${replay.length?replay.slice(0,3).map(r=>`${r.symbol||'—'} · ${r.side||'—'} · ${(Number(r.realizedR||0)).toFixed(2)}R`).join('<br>'):'Belum ada paper trade tertutup.'}</p><div class="fdCardFoot"><span>${replay.length} terbaru</span><span>REVIEW</span></div></article><article class="fdCard"><div class="fdCardTop"><span class="fdIcon">ADP</span><span class="fdIndex">03</span></div><h3>PER MARKET</h3><p>${top.length?top.map(r=>`${r.key.replace('USDT','/USDT')} · ${r.n} trade · ${r.expectancy.toFixed(2)}R`).join('<br>'):'Belum ada data.'}</p><div class="fdCardFoot"><span>Statistik</span><span>BUKA</span></div></article><article class="fdCard"><div class="fdCardTop"><span class="fdIcon">REG</span><span class="fdIndex">04</span></div><h3>PER REGIME</h3><p>${x.byRegime.length?x.byRegime.slice(0,3).map(r=>`${r.key} · ${r.n} · ${r.expectancy.toFixed(2)}R`).join('<br>'):'Belum ada data.'}</p><div class="fdCardFoot"><span>Review saja</span><span>AMAN</span></div></article></div><div class="note" style="margin-top:8px">V6.12 hanya membaca hasil PAPER untuk evaluasi. Threshold strategi <b>tidak diubah otomatis</b> dan tidak ada order LIVE yang dikirim.</div>`;h.querySelector('#v612Refresh')?.addEventListener('click',()=>renderAdaptiveLearningV612())}
-
-
-// ===== V6.18 FINAL PAPER AUTO ENGINE + DAILY REPORT =====
-const PAPER_ENGINE_KEY='obsidian_paper_engine_v615';
-let PAPER_ENGINE=(()=>{try{return JSON.parse(localStorage.getItem(PAPER_ENGINE_KEY)||'null')}catch{return null}})()||{enabled:false,lastScan:0,startedAt:0,scanCount:0,entryCount:0,blockedCount:0,rotations:0,notes:[]};
-let PAPER_ENGINE_RUNNING=false;
-function paperEnginePersist(){try{localStorage.setItem(PAPER_ENGINE_KEY,JSON.stringify(PAPER_ENGINE))}catch{}}
-function paperEngineDay(ts=Date.now()){return new Date(ts).toISOString().slice(0,10)}
-function paperEngineReport(){
- const rows=Array.isArray(PAPER?.trades)?PAPER.trades:[], today=paperEngineDay(), dayRows=rows.filter(r=>paperEngineDay(r.ts||r.openedTs)===today);
- const pnl=dayRows.reduce((a,r)=>a+Number(r.netPnl||0),0), wins=dayRows.filter(r=>Number(r.netPnl)>0).length;
- const dd=PAPER?.peak>0?Math.max(0,(PAPER.peak-PAPER.equity)/PAPER.peak*100):0;
- return {today,n:dayRows.length,pnl,wins,losses:dayRows.filter(r=>Number(r.netPnl)<0).length,hit:dayRows.length?wins/dayRows.length*100:0,dd,total:rows.length,equity:Number(PAPER?.equity||0)};
-}
-function renderPaperEngineV615(){
- const h=$('paperEngineV615');if(!h)return;const r=paperEngineReport();
- const engine=PAPER_ENGINE.enabled?'ON':'OFF', tone=PAPER_ENGINE.enabled?'good':'gold';
- h.innerHTML=`<div class="fdSectionHead"><div><span class="label">V6.18 FINAL PAPER AUTO ENGINE</span><b>Rotasi + MTF + timing + position manager dalam mode simulasi</b></div><button class="btn ${PAPER_ENGINE.enabled?'active':''}" id="paperEngineToggle">PAPER AUTO ENGINE: ${engine}</button></div>
- <div class="paperSafe">🛡 <b>SIMULASI SAJA.</b> Mesin ini tidak mengirim order LIVE. Saat aktif, sistem boleh mencari kandidat, menjalankan rotasi, membuat paper entry, dan mengelola posisi virtual sesuai semua gate yang sudah ada.</div>
- <div class="scannerStats"><div><small>MESIN</small><b class="${tone}">${engine}</b><span>${PAPER_ENABLED?'Paper aktif':'Paper belum aktif'}</span></div><div><small>SCAN HARI INI</small><b>${PAPER_ENGINE.scanCount||0}</b><span>rotasi ${PAPER_ENGINE.rotations||0}</span></div><div><small>ENTRY HARI INI</small><b>${r.n}</b><span>${r.wins} menang · ${r.losses} rugi</span></div><div><small>HASIL HARI INI</small><b class="${r.pnl>=0?'good':'bad'}">${r.pnl>=0?'+':''}${r.pnl.toFixed(2)}</b><span>Hit ${r.hit.toFixed(1)}%</span></div><div><small>DRAWDOWN</small><b>${r.dd.toFixed(2)}%</b><span>Paper equity ${r.equity.toFixed(2)}</span></div><div><small>STATUS</small><b>${PAPER.position?'POSISI AKTIF':PAPER.pending?'MENUNGGU ENTRY':'MENCARI PELUANG'}</b><span>${PAPER_ENGINE.lastScan?new Date(PAPER_ENGINE.lastScan).toLocaleTimeString():'belum scan'}</span></div></div>
- <div class="contextRows"><div><span>Urutan mesin</span><b>SCAN → ROTASI → MTF → TIMING → PAPER ENTRY → MANAGER</b></div><div><span>Total closed paper</span><b>${r.total}</b></div><div><span>Market aktif</span><b>${S.symbol.replace('USDT','/USDT')}</b></div><div><span>Order LIVE</span><b>DINONAKTIFKAN</b></div></div>
- <div class="note" style="margin-top:8px">Mesin tidak dipaksa melakukan entry. Tidak ada target profit harian. Jika tidak ada setup yang memenuhi semua syarat, status tetap mencari/menunggu.</div>`;
- $('paperEngineToggle')?.addEventListener('click',()=>{
-   PAPER_ENGINE.enabled=!PAPER_ENGINE.enabled;
-   PAPER_ENGINE.startedAt=PAPER_ENGINE.enabled?Date.now():PAPER_ENGINE.startedAt;
-   PAPER_ENGINE.notes=[];
-   if(PAPER_ENGINE.enabled){PAPER_ENABLED=true;PAPER_AUTO_ROTATION=true;localStorage.setItem('obsidian_paper_auto_rotation','1');paperPersist();}
-   paperEnginePersist();
-   renderPaperEngineV615();
-   if(PAPER_ENGINE.enabled)runMarketScanner();
- });
-}
-function paperEngineTick(){
- if(!PAPER_ENGINE.enabled||!PAPER_ENABLED||PAPER_ENGINE_RUNNING)return;
- PAPER_ENGINE_RUNNING=true;
- PAPER_ENGINE.scanCount=Number(PAPER_ENGINE.scanCount||0)+1;PAPER_ENGINE.lastScan=Date.now();paperEnginePersist();
- runMarketScanner().catch(()=>{}).finally(()=>{PAPER_ENGINE_RUNNING=false;paperEnginePersist();});
-}
+function renderMarketScanner(){const h=$('marketScannerV608');if(!h)return;h.innerHTML=`<div class="scannerHead"><div><span class="label">V6.09 MARKET SCANNER</span><b>Regime + kualitas entry + risiko simulasi</b><div class="scannerStatus">Siap memindai 12 market.</div></div><button class="btn active" id="scannerRefresh">SCAN SEKARANG</button></div><div class="scannerSafe">🛡 Belum terhubung ke AUTO order. Gunakan untuk review setup.</div>`;$('scannerRefresh')?.addEventListener('click',runMarketScanner);runMarketScanner();}
 
 function renderFeatureDashboardV601(){
   const h=$('featureDashboardV601'); if(!h)return;
@@ -3853,13 +3615,12 @@ function renderFeatureDashboardV601(){
     ['REPORT','Full Trading Report','Audit-ready performance summary','performance','Open Performance'],
     ['CONTROL','Human Review & Control','Manual review · export · real order OFF','control','Human required']
   ];
-  h.innerHTML=`<div class="fdHero"><div><span class="label">V6.18 FEATURE CONTROL DASHBOARD</span><h2>Semua fitur utama terlihat dalam satu tempat</h2><p>Gunakan kartu di bawah untuk membuka modul. Modul analisis/simulasi tidak mengirim order nyata.</p></div><div class="fdDecision ${decision==='TRADE'?'good':decision==='BLOCK'?'bad':'gold'}"><small>LIVE DECISION</small><b>${decision}</b><span>${Number(d.score||0)}/100</span></div></div>
+  h.innerHTML=`<div class="fdHero"><div><span class="label">V6.09 FEATURE CONTROL DASHBOARD</span><h2>Semua fitur utama terlihat dalam satu tempat</h2><p>Gunakan kartu di bawah untuk membuka modul. Modul analisis/simulasi tidak mengirim order nyata.</p></div><div class="fdDecision ${decision==='TRADE'?'good':decision==='BLOCK'?'bad':'gold'}"><small>LIVE DECISION</small><b>${decision}</b><span>${Number(d.score||0)}/100</span></div></div>
   <div class="fdStats"><div><small>DATA QUALITY</small><b>${dq.score}/100</b><span>${dq.status}</span></div><div><small>PAPER CLOSED</small><b>${st.n}</b><span>${st.n>=20?'REVIEWABLE':'COLLECTING'}</span></div><div><small>SIM DRAWDOWN</small><b>${Number(st.dd||0).toFixed(2)}%</b><span>Protection monitored</span></div><div><small>SAFETY GATE</small><b>${safe.state}</b><span>Manual review</span></div><div><small>STRATEGY</small><b>${freeze?'FROZEN':'NOT FROZEN'}</b><span>Version controlled</span></div><div><small>REAL ORDER AUTO</small><b>OFF</b><span>Not activated</span></div></div>
   <div class="fdSection"><div class="fdSectionHead"><div><span class="label">FEATURE MAP</span><b>Modul yang sudah terpasang</b></div><span class="fdCount">${cards.length} MODULES</span></div><div class="fdGrid">${cards.map((c,i)=>`<article class="fdCard"><div class="fdCardTop"><span class="fdIcon">${c[0]}</span><span class="fdIndex">${String(i+1).padStart(2,'0')}</span></div><h3>${c[1]}</h3><p>${c[2]}</p><div class="fdCardFoot"><span>${c[4]}</span><button class="btn fdOpen" data-open="${c[3]}">BUKA</button></div></article>`).join('')}</div></div>
-  <div class="fdSection" style="margin-top:10px"><div id="marketScannerV608"></div></div><div class="fdSection" style="margin-top:10px"><div id="adaptiveLearningV612"></div></div><div class="fdSection" style="margin-top:10px"><div id="smartEntryV613"></div></div><div class="fdSection" style="margin-top:10px"><div id="positionManagerV614"></div></div><div class="fdSection" style="margin-top:10px"><div id="paperEngineV615"></div></div>  <div class="fdSection fdChecklist"><div class="fdSectionHead"><div><span class="label">CURRENT SYSTEM STATE</span><b>Ringkasan yang harus dilihat sebelum pengujian</b></div></div><div class="fdChecks"><div><i class="${dq.score>=90?'good':'gold'}">${dq.score>=90?'✓':'!'}</i><b>Data</b><span>${dq.score}/100 · ${dq.status}</span></div><div><i class="${st.n>=20?'good':'gold'}">${st.n>=20?'✓':'!'}</i><b>Paper sample</b><span>${st.n} closed trades</span></div><div><i class="${Number(st.dd||0)<8?'good':'bad'}">${Number(st.dd||0)<8?'✓':'!'}</i><b>Drawdown</b><span>${Number(st.dd||0).toFixed(2)}%</span></div><div><i class="${freeze?'good':'gold'}">${freeze?'✓':'!'}</i><b>Strategy Freeze</b><span>${freeze?'FROZEN':'NOT FROZEN'}</span></div><div><i class="good">✓</i><b>Real Order Automation</b><span>DISABLED</span></div><div><i class="${safe.state==='READY FOR MANUAL REVIEW'?'good':'gold'}">${safe.state==='READY FOR MANUAL REVIEW'?'✓':'!'}</i><b>Safety Gate</b><span>${safe.state}</span></div></div></div>`;
+  <div class="fdSection" style="margin-top:10px"><div id="marketScannerV608"></div></div>  <div class="fdSection fdChecklist"><div class="fdSectionHead"><div><span class="label">CURRENT SYSTEM STATE</span><b>Ringkasan yang harus dilihat sebelum pengujian</b></div></div><div class="fdChecks"><div><i class="${dq.score>=90?'good':'gold'}">${dq.score>=90?'✓':'!'}</i><b>Data</b><span>${dq.score}/100 · ${dq.status}</span></div><div><i class="${st.n>=20?'good':'gold'}">${st.n>=20?'✓':'!'}</i><b>Paper sample</b><span>${st.n} closed trades</span></div><div><i class="${Number(st.dd||0)<8?'good':'bad'}">${Number(st.dd||0)<8?'✓':'!'}</i><b>Drawdown</b><span>${Number(st.dd||0).toFixed(2)}%</span></div><div><i class="${freeze?'good':'gold'}">${freeze?'✓':'!'}</i><b>Strategy Freeze</b><span>${freeze?'FROZEN':'NOT FROZEN'}</span></div><div><i class="good">✓</i><b>Real Order Automation</b><span>DISABLED</span></div><div><i class="${safe.state==='READY FOR MANUAL REVIEW'?'good':'gold'}">${safe.state==='READY FOR MANUAL REVIEW'?'✓':'!'}</i><b>Safety Gate</b><span>${safe.state}</span></div></div></div>`;
   h.querySelectorAll('.fdOpen').forEach(btn=>btn.onclick=()=>{const tab=btn.dataset.open; const t=document.querySelector(`.tab[data-tab="${tab}"]`); if(t){document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');render(tab); document.querySelector('.bottom')?.scrollIntoView({behavior:'smooth',block:'start'});}});
   renderMarketScanner();
-  renderAdaptiveLearningV612();renderV613SmartEntry();renderV614PositionManager();renderPaperEngineV615();
 }
 
 function render(tab){tab=tab||'dashboard';setDashboardView(tab);let el=$('content');
@@ -4015,7 +3776,7 @@ cv.addEventListener('pointermove',e=>{if(!S.drag)return;let r=cv.getBoundingClie
 cv.addEventListener('pointerup',()=>{S.drag=null});
 $('entryGuard')?.addEventListener('change',e=>{ENTRY_GUARD=e.target.checked;updateEntryButtons()});
 function syncAutoRiskUI(){const el=$('autoLossCut');if(el){el.value=AUTO_LOSS_CUT_IDR;el.addEventListener('input',e=>{AUTO_LOSS_CUT_IDR=Math.max(0,Number(e.target.value)||0);});}}
-function syncAutoTradeUI(){const b=$('autoTradeBtn');if(b){b.textContent=AUTO_ENTRY?'AUTO: ON':'AUTO: OFF';b.className='btn '+(AUTO_ENTRY?'long':'');b.setAttribute('aria-pressed',AUTO_ENTRY?'true':'false');}setAutoStatus(AUTO_ENTRY?(AUTO_ROTATION?'AUTO AKTIF · entry + rotasi market + proteksi berjalan':'AUTO AKTIF · entry + proteksi berjalan selama dashboard terbuka'):'AUTO TRADE MATI · order hanya manual',AUTO_ENTRY?'good':'wait');}
+function syncAutoTradeUI(){const b=$('autoTradeBtn');if(b){b.textContent=AUTO_ENTRY?'AUTO: ON':'AUTO: OFF';b.className='btn '+(AUTO_ENTRY?'long':'');b.setAttribute('aria-pressed',AUTO_ENTRY?'true':'false');}setAutoStatus(AUTO_ENTRY?'AUTO AKTIF · entry + proteksi berjalan selama dashboard terbuka':'AUTO TRADE MATI · order hanya manual',AUTO_ENTRY?'good':'wait');}
 $('autoTradeBtn')?.addEventListener('click',()=>{AUTO_ENTRY=!AUTO_ENTRY;localStorage.setItem('obsidian_auto_trade',AUTO_ENTRY?'1':'0');syncAutoTradeUI();updateEntryButtons()});
 $('autoProfitArm')?.addEventListener('input',e=>{AUTO_PROFIT_ARM_IDR=Math.max(0,Number(e.target.value)||0)});
 $('autoProfitGiveback')?.addEventListener('input',e=>{AUTO_PROFIT_GIVEBACK_PCT=Math.min(90,Math.max(5,Number(e.target.value)||35))});
@@ -4088,7 +3849,7 @@ document.getElementById('signalTf')?.addEventListener('change',()=>renderSignalD
 document.getElementById('clearSignals')?.addEventListener('click',()=>{if(!confirm('Hapus riwayat Signal Drop untuk pair ini?'))return;SIGNALS=SIGNALS.filter(x=>x.symbol!==S.symbol);persistSignals();renderSignalDrop()});
 renderSignalDrop();
 ensureAuth();
-Promise.all([jsonFetch('/api/health'),jsonFetch('/api/runtime')]).then(([x,rt])=>{updateModeUI(rt);S.kill=!!x.killSwitch;$('kill').textContent=S.kill?'KILL ON':'KILL'}).catch(e=>{$('conn').textContent='API ERROR';$('conn').title=e.message});render();resize();load();setTimeout(()=>{resize();safeDraw()},250);setInterval(()=>{if(marketWsConnected&&Date.now()-lastMarketWsDataAt>5000){try{wsMarket?.close()}catch{}}},2000);setInterval(()=>{if(document.querySelector('.tab.active')?.dataset.tab==='dashboard'){renderFeatureDashboardV601();renderV613SmartEntry();renderV614PositionManager();renderPaperEngineV615()}},3000);setInterval(()=>paperEngineTick(),60000);setInterval(updateAITrend,1500);setInterval(updateLiveSignal,500);setInterval(tickLivePositionHero,1000);setInterval(mtf,5000);setInterval(()=>{renderFutureForecast();updateSignalDropCountdown()},1000);setInterval(autoProfitProtect,1000);setInterval(autoRecoverPendingSignal,2000);setInterval(scheduleLivePrediction,5000);depth();oiTimer=setInterval(depth,3000);accountTimer=setInterval(()=>{if(!accountWsConnected||Date.now()-lastAccountWsDataAt>4000)refreshAccount().catch(()=>{});},1000);
+Promise.all([jsonFetch('/api/health'),jsonFetch('/api/runtime')]).then(([x,rt])=>{updateModeUI(rt);S.kill=!!x.killSwitch;$('kill').textContent=S.kill?'KILL ON':'KILL'}).catch(e=>{$('conn').textContent='API ERROR';$('conn').title=e.message});render();resize();load();setTimeout(()=>{resize();safeDraw()},250);setInterval(()=>{if(marketWsConnected&&Date.now()-lastMarketWsDataAt>5000){try{wsMarket?.close()}catch{}}},2000);setInterval(()=>{if(document.querySelector('.tab.active')?.dataset.tab==='dashboard')renderFeatureDashboardV601()},3000);setInterval(updateAITrend,1500);setInterval(updateLiveSignal,500);setInterval(tickLivePositionHero,1000);setInterval(mtf,5000);setInterval(()=>{renderFutureForecast();updateSignalDropCountdown()},1000);setInterval(autoProfitProtect,1000);setInterval(autoRecoverPendingSignal,2000);setInterval(scheduleLivePrediction,5000);depth();oiTimer=setInterval(depth,3000);accountTimer=setInterval(()=>{if(!accountWsConnected||Date.now()-lastAccountWsDataAt>4000)refreshAccount().catch(()=>{});},1000);
 
 
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstallPrompt=e;const b=$('installPwa');if(b){b.style.display='inline-block';b.classList.add('pwaInstall')}});
