@@ -3888,9 +3888,17 @@ async function autoSupervisorTick(){
       setAutoStatus(`AUTO AKTIF · POSISI ${Number(p.positionAmt)>0?'LONG':'SHORT'} ${String(p.symbol||'').replace('USDT','/USDT')} · chart mengikuti posisi`,'good');
       return;
     }
-    // AUTO ON means the engine must actually search the Futures universe.
-    // The old separate ROTASI toggle could leave AUTO enabled but idle.
+    // SIGNAL-FIRST: if the currently displayed chart already has a real BUY/SELL
+    // signal, execute it FIRST. Do not rotate away from a visible entry waiting
+    // for a higher scanner score. Rotation is only a fallback when the current
+    // chart is WAIT.
     if(!AUTO_ROTATION){AUTO_ROTATION=true;try{localStorage.setItem('obsidian_auto_rotation','1')}catch{}}
+    const current=getFinalSignal();
+    if(['BUY','SELL'].includes(current?.side)){
+      const currentCandidate={symbol:S.symbol,side:current.side,score:Number(current.score||0),quality:Number(current.quality?.score||current.quality||0),reason:'LIVE SIGNAL-FIRST'};
+      await autoScanAndEnter([currentCandidate]);
+      return;
+    }
     await runMarketScanner();
   }catch(e){
     setAutoStatus(`AUTO SUPERVISOR · ${e?.message||'menunggu koneksi akun'}`,'wait');
@@ -3949,7 +3957,8 @@ async function autoScanAndEnter(candidates){
   // capital protection, a usable SL/TP plan, and Binance/server validation.
   const list=(Array.isArray(candidates)?candidates:[])
     .filter(x=>x&&['BUY','SELL'].includes(x.side))
-    .filter(x=>Number(x.score||0)>=OPPORTUNITY_MIN_SCORE)
+    // Signal-First: BUY/SELL itself is the trigger. Score/quality are used for
+    // adaptive sizing and diagnostics, never as a hard entry veto.
     .slice(0,12);
   if(!list.length){setRotationStatus('SCAN · mencari pair dengan peluang BUY/SELL…','wait');return;}
   if(S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0){setRotationStatus('ROTASI DITAHAN · posisi masih terbuka','wait');return;}
@@ -3970,8 +3979,8 @@ async function autoScanAndEnter(candidates){
       const live=getFinalSignal();
       const liveSide=live?.side;
       const liveScore=Number(live?.score||0);
-      if(!['BUY','SELL'].includes(liveSide) || liveScore<OPPORTUNITY_MIN_SCORE){
-        setRotationStatus(`LIHAT SIGNAL · ${S.symbol.replace('USDT','/USDT')} · ${liveSide||'WAIT'} ${liveScore}/100 · lanjut pair berikutnya`,'wait');
+      if(!['BUY','SELL'].includes(liveSide)){
+        setRotationStatus(`LIHAT SIGNAL · ${S.symbol.replace('USDT','/USDT')} · WAIT · lanjut pair berikutnya`,'wait');
         continue;
       }
 
@@ -4099,7 +4108,9 @@ async function runMarketScanner(){
   }SCANNER_ROWS=out.filter(x=>x.ok).sort((a,b)=>(b.quality-a.quality)||(b.score-a.score)||(Math.abs(b.change24h||0)-Math.abs(a.change24h||0)));
   // AUTO ENTRY: only rotate when the scanner has a real BUY/SELL direction.
   // Never rotate just because a pair ranks high; the next action must be entry.
-  const candidates=SCANNER_ROWS.filter(x=>x.score>=OPPORTUNITY_MIN_SCORE&&x.quality>=OPPORTUNITY_MIN_QUALITY&&['BUY','SELL'].includes(x.side)).slice(0,8);
+  // Signal-First: scanner only discovers direction. BUY/SELL is enough to
+  // become an execution candidate; score/quality no longer suppress discovery.
+  const candidates=SCANNER_ROWS.filter(x=>['BUY','SELL'].includes(x.side)).slice(0,12);
   const list=candidates.length?candidates.map((x,i)=>`<div class="scannerRow"><div><b>${i+1}. ${x.symbol.replace('USDT','/USDT')}</b><span>${x.side} · ${x.regime?.label||'—'}</span></div><div><b>${x.quality}/100</b><span>Teknikal ${x.score}/100 · OI ${x.openInterest?(x.openInterest>=1000000?(x.openInterest/1000000).toFixed(1)+'M':x.openInterest.toFixed(0)):'—'} · Funding ${x.fundingRate!=null?(x.fundingRate*100).toFixed(3)+'%':'—'}</span></div><div><b>${x.rsi==null?'—':x.rsi.toFixed(0)}</b><span>RSI · ADX ${x.adx==null?'—':x.adx.toFixed(0)} · 24j ${x.change24h==null?'—':(x.change24h>=0?'+':'')+x.change24h.toFixed(1)+'%'} · Spread ${x.spreadPct?x.spreadPct.toFixed(3)+'%':'—'}</span></div><div class="scannerReason"><b>${x.entry}</b> · ${x.reason}<br><span>${scannerRiskText(x)}</span></div></div>`).join(''):'<div class="note">Belum ada setup yang cukup berkualitas. Sistem tidak memaksa entry.</div>';
   const top=SCANNER_ROWS.slice(0,10).map(x=>`${x.symbol} ${x.side} ${x.quality}`).join(' · '), best=candidates[0]||null;
   h.innerHTML=`<div class="scannerHead"><div><span class="label">V6.18.12 OPPORTUNITY-FIRST FUTURES SCANNER</span><b>Mencari market Futures aktif lalu memilih setup terbaik</b><div class="scannerStatus">${candidates.length} kandidat · diperbarui ${new Date().toLocaleTimeString()}</div></div><div class="g2"><button class="btn active" id="scannerRefresh">SCAN SEKARANG</button><button class="btn ${AUTO_ROTATION?'long':''}" id="autoRotationBtn">SCAN AUTO: ${AUTO_ROTATION?'ON':'OFF'}</button><button class="btn ${PAPER_AUTO_ROTATION?'active':''}" id="paperAutoRotationBtn">PAPER AUTO: ${PAPER_AUTO_ROTATION?'ON':'OFF'}</button></div></div><div class="scannerSafe">🛡 <b>Rotasi otomatis hanya aktif saat AUTO juga ON.</b> Sistem tidak berpindah market jika masih ada posisi terbuka. Entry tetap melewati safety gate, tetapi threshold peluang dibuat adaptif agar tidak pasif.</div><div id="autoRotationStatus" class="note wait">${PAPER_ENGINE.enabled?'PAPER AUTO sedang mencari peluang secara aman…':AUTO_ENTRY&&AUTO_ROTATION?'AUTO LIVE aktif · scanner → validasi → order → posisi → chart':'PAPER siap · aktifkan PAPER AUTO ENGINE untuk uji otomatis'}</div><div class="scannerStats"><div><small>MARKET DIPINDAI</small><b>${SCANNER_ROWS.length}/${SCANNER_SYMBOLS.length}</b><span>dinamis</span></div><div><small>KANDIDAT</small><b>${candidates.length}</b></div><div><small>MARKET TERPILIH</small><b>${best?best.symbol.replace('USDT','/USDT'):'—'}</b></div><div><small>KUALITAS</small><b>${best?.quality||0}/100</b></div></div><div class="scannerList">${list}</div><div class="scannerReview"><div><small>KANDIDAT TERATAS</small><b>${best?best.symbol.replace('USDT','/USDT')+' · '+best.side:'—'}</b><span>${best?best.regime?.label+' · kualitas '+best.quality+'/100':'Belum ada kandidat'}</span></div><div><small>GATE</small><b>${best?.entry||'TUNGGU'}</b><span>${best?scannerRiskText(best):'Menunggu scan'}</span></div><div><small>ALASAN</small><b>${best?.reason||'—'}</b><span>Market dipilih berdasarkan ranking scan + likuiditas/funding/OI/spread; entry tetap diverifikasi ulang.</span></div></div><div class="note" style="margin-top:8px">Scanner memilih market secara dinamis berdasarkan likuiditas, pergerakan, funding, open interest, spread, dan kualitas setup. Kenaikan ekstrem tidak otomatis berarti BUY; sistem mencari peluang yang cukup layak, bukan menunggu setup sempurna. Safety dan risk gate tetap aktif. ${top||'Belum ada data.'}</div>`;
