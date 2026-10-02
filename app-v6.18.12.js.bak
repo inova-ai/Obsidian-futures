@@ -75,8 +75,8 @@ const SIGNAL_KEY='obsidian_signal_drop_v4';
 let ADAPTIVE_CACHE={key:'',upto:0,model:null};
 let ADAPTIVE_INFO={samples:0,features:0,updatedAt:0};
 let AUTO_ENTRY=localStorage.getItem('obsidian_auto_trade')==='1';
-let AUTO_CONFIRM_SCORE=58;
-let AUTO_CONFIRM_GAP=2;
+let AUTO_CONFIRM_SCORE=65;
+let AUTO_CONFIRM_GAP=4;
 let lastAutoSignalKey=localStorage.getItem('obsidian_auto_last_signal')||null;
 let SHADOW_ENABLED=localStorage.getItem('obsidian_shadow_mode')==='1';
 let SHADOW_ROWS=(()=>{try{return JSON.parse(localStorage.getItem('obsidian_shadow_rows')||'[]')}catch{return []}})();
@@ -615,9 +615,9 @@ const fmIDR=fmtIDR;
 const toUSDT=idr=>(+idr||0)/Math.max(1,USDT_IDR_RATE);
 const floorStep=(v,step)=>{v=Number(v);step=Number(step);if(!Number.isFinite(v)||!Number.isFinite(step)||step<=0)return 0;const d=Math.max(0,(String(step).split('.')[1]||'').length),f=10**d;return Math.floor((v*f+1e-9)/(step*f))*step};
 async function loadOrderConstraints(){try{const x=await jsonFetch(`/api/order/constraints?symbol=${encodeURIComponent(S.symbol)}`);if(x?.lotSize)ORDER_FILTERS=x.lotSize; if(x?.priceFilter?.tickSize)ORDER_FILTERS.tickSize=x.priceFilter.tickSize;}catch{}}
-async function serverOrderPreview(side,overrideRiskPct=null){
+async function serverOrderPreview(side){
   const z=S.smart?.[side.toLowerCase()]; if(!z)throw Error('SL/TP belum siap');
-  const capitalIdr=+$('capital').value||0, riskPct=Number.isFinite(Number(overrideRiskPct))?clamp(Number(overrideRiskPct),ADAPTIVE_MIN_RISK_PCT,ADAPTIVE_MAX_RISK_PCT):+$('risk').value||0, leverage=+$('lev').value||1;
+  const capitalIdr=+$('capital').value||0, riskPct=+$('risk').value||0, leverage=+$('lev').value||1;
   const entryType=String($('entryType')?.value||'MARKET').toUpperCase();
   const entryIdr=Number($('entryPrice')?.value||0); const entryInput=entryType==='LIMIT'?toUSDT(entryIdr):Number(S.c.at(-1)?.c||0);
   const body={symbol:S.symbol,side,entryType,entry:entryInput,entryPrice:entryInput,stopLoss:z.sl,takeProfit:$('noTp').checked?0:z.tp,capital:toUSDT(capitalIdr),riskPct,leverage,marginType:String($('margin')?.value||'Cross').toUpperCase(),sizingMode:String($('sizingMode')?.value||'MARGIN').toUpperCase()};
@@ -1324,7 +1324,7 @@ function buildSmartRiskPlan(pred){
   const sr=pred.sr||detectSR(a);
   const buffer=Math.max(atr*0.18,entry*0.00035);
   const zone=Math.max(atr*0.22,entry*0.00045);
-  const rrTarget=Math.max(1.25,Number($('rr')?.value||1.5));
+  const rrTarget=Math.max(1.5,Number($('rr')?.value||2));
   let sl,tp1,tp2,entryLow,entryHigh;
   if(pred.side==='BUY'){
     const support=Number(sr?.support||0);
@@ -3309,8 +3309,9 @@ async function scheduleAutoTrade(row){
   const safety=buildKillSwitchIntelligence();
   if(safety.state==='PAUSE'){setAutoStatus(`AUTO DITAHAN · ${safety.issues.slice(0,2).map(x=>x.reason).join(' · ')}`,'bad');renderKillSwitchIntelligence();return;}
   if(row.side==='WAIT'){setAutoStatus('AUTO AKTIF · belum ada arah entry yang valid','wait');return;}
-  if(!row.riskPlan?.valid || Number(row.riskPlan?.rr1||0)<OPPORTUNITY_MIN_RR){setAutoStatus(`AUTO MENUNGGU · rencana risiko / R:R belum memenuhi syarat · ${Number(row.riskPlan?.rr1||0).toFixed(1)}R`,'wait');return;}
-  if(Number(row.quality?.score||0)<OPPORTUNITY_MIN_QUALITY){setAutoStatus(`AUTO MENUNGGU · kualitas ${Number(row.quality?.score||0)}/100, minimum aktif ${OPPORTUNITY_MIN_QUALITY}`,'wait');return;}
+  if(!row.readiness?.ready){setAutoStatus(`AUTO MENUNGGU · kesiapan entry ${row.readiness?.label||'WAIT'}`,'wait');return;}
+  if(!row.riskPlan?.valid || Number(row.riskPlan?.rr1||0)<1.5){setAutoStatus('AUTO MENUNGGU · rencana risiko / R:R belum memenuhi syarat','wait');return;}
+  if(Number(row.quality?.score||0)<70){setAutoStatus(`AUTO MENUNGGU · kualitas ${Number(row.quality?.score||0)}/100`,'wait');return;}
   if(Number(row.score||0)<AUTO_CONFIRM_SCORE){setAutoStatus(`AUTO MENUNGGU · skor ${Number(row.score||0)}/100, minimum ${AUTO_CONFIRM_SCORE}`,'wait');return;}
   const edgeGate=getProfitabilityGate(row);
   if(edgeGate.state==='NO-TRADE'){setAutoStatus(`AUTO DITAHAN · EDGE HISTORIS NEGATIF · ${edgeGate.reason}`,'wait');return;}
@@ -3339,8 +3340,9 @@ async function scheduleAutoTrade(row){
     }
     if(!S.accountPosition||Math.abs(Number(S.accountPosition.positionAmt||0))===0){
       const fresh=getFinalSignal();
-      const freshEdge=getProfitabilityGate(fresh);
-      if(fresh.side!==row.side || !fresh.riskPlan?.valid || Number(fresh.riskPlan?.rr1||0)<OPPORTUNITY_MIN_RR || Number(fresh.score||0)<AUTO_CONFIRM_SCORE || Number(fresh.gap||0)<AUTO_CONFIRM_GAP || freshEdge.state==='NO-TRADE'){setAutoStatus(`AUTO: signal berubah · ${fresh.side} ${fresh.score||0}/100 · risk ${Number(fresh.riskPlan?.rr1||0).toFixed(1)}R · menunggu sinkron…`,'wait');return;}
+      const freshEdge=getProfitabilityGate(fresh); const freshDecision=buildUnifiedDecision(fresh);
+      if(freshDecision.state!=='READY'){setAutoStatus(`AUTO WAIT: Decision Engine ${freshDecision.state} · ${freshDecision.reasons.slice(0,2).join(' · ')||'guard belum lolos'}`,'wait');return;}
+      if(fresh.side!==row.side || !fresh.readiness?.ready || Number(fresh.quality?.score||0)<70 || !fresh.riskPlan?.valid || Number(fresh.score||0)<AUTO_CONFIRM_SCORE || Number(fresh.gap||0)<AUTO_CONFIRM_GAP || freshEdge.state==='NO-TRADE'){setAutoStatus(`AUTO: signal/entry readiness berubah · ${fresh.side} ${fresh.score||0}/100 · ENTRY ${fresh.readiness?.label||'WAIT'} · menunggu sinkron…`,'wait');return;}
       const timing=entryTimingGuard(row.side,fresh);
       if(!timing.ok){setAutoStatus(`AUTO WAIT: ${timing.reason}`,'wait');return;}
       setAutoStatus(`AUTO: membuka ${row.side} · skor ${fresh.score}/100 · timing entry OK…`,'wait');
@@ -3374,7 +3376,7 @@ async function autoRecoverPendingSignal(){
 
 function resetAutoProtect(){AUTO_PROTECT={key:null,side:null,peak:0,armed:false,lastActionAt:0};}
 function currentPositionSide(){const p=S.accountPosition;if(!p||Math.abs(Number(p.positionAmt||0))<=0)return null;return Number(p.positionAmt)>0?'BUY':'SELL';}
-async function autoProfitProtectLegacy(){
+async function autoProfitProtect(){
   if(!AUTO_ENTRY||MANUAL_ENTRY_STOP||autoProtectBusy||autoBusy)return;
   const p=S.accountPosition;
   if(!p||Math.abs(Number(p.positionAmt||0))<=0){resetAutoProtect();return;}
@@ -3420,65 +3422,6 @@ async function autoProfitProtectLegacy(){
   }catch(e){setAutoStatus(`AUTO PROTECT GAGAL: ${e.message}`,'bad');}
   finally{autoProtectBusy=false;}
 }
-async function adaptiveManageOpenPosition(){
-  if(!AUTO_ENTRY||MANUAL_ENTRY_STOP||autoBusy||autoProtectBusy)return;
-  const runtimeMode=String(LIVE_RUNTIME?.tradingMode||'paper').toLowerCase();
-  if(runtimeMode==='paper')return;
-  const p=S.accountPosition;
-  if(!p||Math.abs(Number(p.positionAmt||0))<=0){resetAdaptiveProfit();return;}
-  const key=adaptivePositionKey(p);
-  if(ADAPTIVE_ENGINE.key!==key){
-    const pred=LAST_LIVE_FINAL||getFinalSignal(); const snap=adaptiveProfitSnapshot(p,pred);
-    ADAPTIVE_ENGINE={key,partialDone:false,beDone:false,lastTrailAt:0,entry:Number(p.entryPrice||0),sl:Number(pred?.riskPlan?.sl||0),riskUsd:0,side:snap?.side||currentPositionSide()};
-  }
-  const pred=LAST_LIVE_FINAL||getFinalSignal(); const snap=adaptiveProfitSnapshot(p,pred); if(!snap)return;
-  const currentSL=Number(ADAPTIVE_ENGINE.sl||pred?.riskPlan?.sl||0);
-  const risk=Math.max(snap.riskDist,1e-12);
-  // First protect capital at a modest positive R: partial close, never a signal veto.
-  if(!ADAPTIVE_ENGINE.partialDone && snap.r>=ADAPTIVE_BE_R){
-    try{
-      autoProtectBusy=true;
-      const x=await jsonFetch('/api/live/partial-close',{method:'POST',headers:H(),body:JSON.stringify({symbol:S.symbol,percent:ADAPTIVE_PARTIAL_PCT})});
-      if(x?.error)throw Error(x.error);
-      ADAPTIVE_ENGINE.partialDone=true;
-      setAutoStatus(`PROFIT ENGINE · TP1 ${ADAPTIVE_PARTIAL_PCT}% terkunci · ${snap.r.toFixed(2)}R · sisa posisi dibiarkan berjalan`,'good');
-    }catch(e){setAutoStatus(`PROFIT ENGINE · partial TP gagal · ${e.message}`,'wait');}
-    finally{autoProtectBusy=false;}
-  }
-  // Once TP1 is reached, move protection toward breakeven. Endpoint keeps the existing TP.
-  if((ADAPTIVE_ENGINE.partialDone||snap.r>=ADAPTIVE_TRAIL_START_R) && !ADAPTIVE_ENGINE.beDone && snap.r>=ADAPTIVE_BE_R){
-    const be=snap.side==='BUY'?snap.entry+snap.atr*.05:snap.entry-snap.atr*.05;
-    try{
-      autoProtectBusy=true;
-      const x=await jsonFetch('/api/live/adjust-protection',{method:'POST',headers:H(),body:JSON.stringify({symbol:S.symbol,stopLoss:be,takeProfit:0,keepTakeProfit:true})});
-      if(x?.error)throw Error(x.error);
-      ADAPTIVE_ENGINE.beDone=true; ADAPTIVE_ENGINE.sl=be;
-      setAutoStatus(`PROFIT ENGINE · BREAK-EVEN aktif · ${snap.r.toFixed(2)}R`,'good');
-    }catch(e){setAutoStatus(`PROFIT ENGINE · BE gagal · ${e.message}`,'wait');}
-    finally{autoProtectBusy=false;}
-  }
-  // Trail only after a real profit cushion. This is management, not a new entry filter.
-  if(ADAPTIVE_ENGINE.beDone && snap.r>=ADAPTIVE_TRAIL_START_R && Date.now()-ADAPTIVE_ENGINE.lastTrailAt>12000){
-    const trailDist=Math.max(snap.atr*.9,risk*.65);
-    const candidate=snap.side==='BUY'?snap.mark-trailDist:snap.mark+trailDist;
-    const improves=snap.side==='BUY'?candidate>currentSL:candidate<currentSL;
-    if(improves){
-      try{
-        autoProtectBusy=true;
-        const x=await jsonFetch('/api/live/adjust-protection',{method:'POST',headers:H(),body:JSON.stringify({symbol:S.symbol,stopLoss:candidate,takeProfit:0,keepTakeProfit:true})});
-        if(x?.error)throw Error(x.error);
-        ADAPTIVE_ENGINE.sl=candidate;ADAPTIVE_ENGINE.lastTrailAt=Date.now();
-        setAutoStatus(`PROFIT ENGINE · TRAILING ${candidate.toFixed(4)} · ${snap.r.toFixed(2)}R`,'good');
-      }catch(e){setAutoStatus(`PROFIT ENGINE · trailing gagal · ${e.message}`,'wait');}
-      finally{autoProtectBusy=false;}
-    }
-  }
-}
-async function autoProfitProtect(){
-  // Legacy hard loss/profit protection remains as a final safety layer.
-  await autoProfitProtectLegacy();
-  await adaptiveManageOpenPosition();
-}
 function setAutoStatus(msg,cls='wait'){const el=$('autoTradeStatus');if(el){el.textContent=msg;el.className='note '+cls;}}
 function refreshSignalFromCurrent(){recordPredictionSignal()}
 function scheduleLivePrediction(){/* Frozen Signal Drop: no realtime rewriting. */}
@@ -3491,7 +3434,7 @@ async function order(side,opts={}){
   if(isAuto&&!AUTO_ENTRY)return;
   if(!isAuto&&!window.__manualOrderClick&&AUTO_ENTRY===true)return;
   if(S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0)return alert(`Masih ada posisi Binance ${Number(S.accountPosition.positionAmt)>0?'LONG':'SHORT'} ${Math.abs(Number(S.accountPosition.positionAmt)).toFixed(6)} BTC. Tutup posisi aktif dulu.`);
-  const cp=capitalProtectionCheck(); if(!cp.ok){const msg=cp.reason||'Capital Protection aktif'; setAutoStatus(msg,'bad'); return;}
+  const cp=capitalProtectionCheck(); if(!cp.ok){const msg=cp.reason||'Capital Protection aktif'; if(isAuto)setAutoStatus(msg,'bad'); else alert(msg); return;}
   const g=entryGuard(side);if(!g.ok){alert(g.reason);return}
   const fresh=opts.signal||getFinalSignal();
   // Signal UI uses BUY/SELL while the order engine uses LONG/SHORT.
@@ -3507,12 +3450,11 @@ async function order(side,opts={}){
   const entryType=String($('entryType')?.value||'MARKET').toUpperCase();
   const chosenUSDT=entryType==='LIMIT'?toUSDT(Number($('entryPrice')?.value||0)):Number(S.c.at(-1)?.c||0);
   if(!(chosenUSDT>0))return alert('Harga entry belum tersedia');
-  const adaptiveRisk= isAuto ? adaptiveRiskForSignal(fresh) : null;
-  const capitalIdr=+$('capital').value||0,riskPct=Number.isFinite(Number(opts.autoRiskPct))?clamp(Number(opts.autoRiskPct),ADAPTIVE_MIN_RISK_PCT,ADAPTIVE_MAX_RISK_PCT):(adaptiveRisk?.riskPct||+$('risk').value||0),leverage=+$('lev').value||1,sizingMode=String($('sizingMode')?.value||'MARGIN').toUpperCase();
+  const capitalIdr=+$('capital').value||0,riskPct=+$('risk').value||0,leverage=+$('lev').value||1,sizingMode=String($('sizingMode')?.value||'MARGIN').toUpperCase();
   if(capitalIdr<=0)return alert('Modal harus lebih dari 0');
   const noTp=$('noTp').checked;
   let preview;
-  try{preview=await serverOrderPreview(side,isAuto?riskPct:null)}catch(e){
+  try{preview=await serverOrderPreview(side)}catch(e){
     if(e.message==='POSITION_ALREADY_OPEN')await refreshAccount();
     return alert(e.message);
   }
@@ -3534,7 +3476,7 @@ Mode: ${label}
 
 Lanjut entry?`;
   if(!isAuto&&!confirm(confirmText))return;
-  const body={symbol:S.symbol,side,entry:preview.entryPrice,entryType,entryPrice:entryType==='LIMIT'?chosenUSDT:preview.entryPrice,stopLoss:z.sl,takeProfit:noTp?0:z.tp,capital:toUSDT(capitalIdr),riskPct,leverage,marginType:String($('margin')?.value||'Cross').toUpperCase(),sizingMode,expectedQuantity:Number(preview.finalQty),expectedNotional:Number(preview.finalNotional),setup:'structure+ATR',reason:isAuto?'ai-auto-adaptive':'manual',meta:isAuto?{adaptiveRiskPct:riskPct,edge:adaptiveRisk?.edge||null}:null,profitMode:noTp?'TANPA_BATAS':'TARGET'};
+  const body={symbol:S.symbol,side,entry:preview.entryPrice,entryType,entryPrice:entryType==='LIMIT'?chosenUSDT:preview.entryPrice,stopLoss:z.sl,takeProfit:noTp?0:z.tp,capital:toUSDT(capitalIdr),riskPct,leverage,marginType:String($('margin')?.value||'Cross').toUpperCase(),sizingMode,expectedQuantity:Number(preview.finalQty),expectedNotional:Number(preview.finalNotional),setup:'structure+ATR',reason:isAuto?'ai-auto':'manual',profitMode:noTp?'TANPA_BATAS':'TARGET'};
   const target=mode==='paper'?'/api/paper/order':'/api/live/order';
   const x=await jsonFetch(target,{method:'POST',headers:H(),body:JSON.stringify(body)}).catch(e=>({error:readableError(e),code:e.code}));
   if(x.error){
@@ -3713,56 +3655,14 @@ let PAPER_AUTO_ROTATION=localStorage.getItem('obsidian_paper_auto_rotation')==='
 // Signal Drop UI from silently vetoing an otherwise valid scanner candidate.
 let AUTO_EXECUTION_CONTEXT=null;
 let AUTO_ENGINE_STATE='IDLE';
-const AUTO_ROTATE_MIN_QUALITY=52;
+const AUTO_ROTATE_MIN_QUALITY=58;
 const AUTO_ROTATE_SWITCH_MARGIN=5;
 // V6.18.12 OPPORTUNITY-FIRST: avoid deadlocks from overly strict entry gates.
 // Safety, server-side risk checks, kill switch, and Binance position verification remain mandatory.
-const OPPORTUNITY_MIN_SCORE=52;
+const OPPORTUNITY_MIN_SCORE=58;
 const OPPORTUNITY_MIN_GAP=2;
 const OPPORTUNITY_MIN_RR=1.25;
-const OPPORTUNITY_MIN_QUALITY=52;
-
-// V6.19 ADAPTIVE PROFIT ENGINE — opportunity-first, management-first.
-// Signal thresholds stay loose; historical edge only affects sizing/management.
-let ADAPTIVE_ENGINE={key:null,partialDone:false,beDone:false,lastTrailAt:0,entry:0,sl:0,riskUsd:0,side:null};
-const ADAPTIVE_MIN_RISK_PCT=0.25;
-const ADAPTIVE_MAX_RISK_PCT=1.00;
-const ADAPTIVE_PARTIAL_PCT=30;
-const ADAPTIVE_BE_R=0.80;
-const ADAPTIVE_TRAIL_START_R=1.20;
-const ADAPTIVE_GIVEBACK_PCT=35;
-function adaptiveScoreBucket(score){const n=Number(score||0);return n>=80?'80+':n>=70?'70-79':n>=60?'60-69':n>=52?'52-59':'<52';}
-function adaptiveClosedRows(){return (Array.isArray(SIGNALS)?SIGNALS:[]).filter(x=>x&&x.status==='CLOSED'&&['BUY','SELL'].includes(x.side)&&Number.isFinite(Number(x.realizedR)));}
-function buildAdaptiveEdge(pred){
-  const rows=adaptiveClosedRows(); const bucket=adaptiveScoreBucket(pred?.score); const side=pred?.side; const regime=String(pred?.marketRegime?.label||pred?.marketRegime?.regime||pred?.regime?.label||pred?.regime||'').toUpperCase();
-  const scoped=rows.filter(x=>adaptiveScoreBucket(x.score)===bucket && (!side||x.side===side));
-  const usable=scoped.length>=8?scoped:rows.filter(x=>adaptiveScoreBucket(x.score)===bucket);
-  const wins=usable.filter(x=>Number(x.realizedR)>0).length;
-  const avgR=usable.length?usable.reduce((a,x)=>a+Number(x.realizedR),0)/usable.length:null;
-  const hit=usable.length?wins/usable.length:null;
-  const ev=avgR==null?null:avgR;
-  const edge=ev==null?0:clamp(ev,-1,2);
-  const confidence=usable.length>=30?'HIGH':usable.length>=15?'MEDIUM':'LOW';
-  return {bucket,n:usable.length,hit,avgR,ev,edge,confidence,regime};
-}
-function adaptiveRiskForSignal(pred){
-  const edge=buildAdaptiveEdge(pred), score=Number(pred?.score||0), q=Number(pred?.quality?.score||pred?.scannerQuality||52);
-  // No entry veto here. Better historical buckets receive more/less exposure.
-  let mult=score>=80?1.0:score>=70?.85:score>=60?.65:.45;
-  if(q>=75)mult*=1.05; else if(q<58)mult*=.9;
-  if(edge.n>=8){if(edge.ev>0.35)mult*=1.12;else if(edge.ev>0.1)mult*=1.05;else if(edge.ev<-.25)mult*=.65;else if(edge.ev<0)mult*=.8;}
-  return {riskPct:clamp(0.5*mult,ADAPTIVE_MIN_RISK_PCT,ADAPTIVE_MAX_RISK_PCT),mult,edge};
-}
-function adaptiveProfitSnapshot(position,pred){
-  if(!position)return null;
-  const side=Number(position.positionAmt)>0?'BUY':'SELL', entry=Number(position.entryPrice||0), qty=Math.abs(Number(position.positionAmt||0)), mark=Number(position.markPrice||S.market?.markPrice||0), atr=Number(pred?.atr||S.smart?.atr||ATR(S.c||[]).at(-1)||0);
-  const riskDist=Math.max(Math.abs(Number(pred?.riskPlan?.sl||0)-entry),atr*.55,entry*.0005);
-  const pnlPct=entry>0?((side==='BUY'?mark-entry:entry-mark)/entry)*100:0;
-  const r=riskDist>0?(side==='BUY'?mark-entry:entry-mark)/riskDist:0;
-  return {side,entry,qty,mark,atr,riskDist,r,pnlPct};
-}
-function resetAdaptiveProfit(){ADAPTIVE_ENGINE={key:null,partialDone:false,beDone:false,lastTrailAt:0,entry:0,sl:0,riskUsd:0,side:null};}
-function adaptivePositionKey(p){return [S.symbol,Number(p?.positionAmt||0),Number(p?.entryPrice||0)].join('|');}
+const OPPORTUNITY_MIN_QUALITY=58;
 function scannerNum(v,d=0){const n=Number(v);return Number.isFinite(n)?n:d}
 function scannerRegime(c){
   if(!Array.isArray(c)||c.length<60)return {key:'DATA',label:'DATA BELUM CUKUP',score:0};
@@ -3924,7 +3824,7 @@ async function confirmMultiTimeframe(symbol,side){
       const q=scannerScore(rows); checks.push({tf,side:q.side,quality:q.quality,dir:q.side==='BUY'?'BULL':q.side==='SELL'?'BEAR':'NEUTRAL',ok:q.side===side});
     }catch{checks.push({tf,side:'WAIT',ok:false});}
   }
-  return {aligned:checks.filter(x=>x.ok).length>=1,checks};
+  return {aligned:checks.filter(x=>x.ok).length>=2&&checks.some(x=>x.tf==='15m'&&x.ok),checks};
 }
 function buildScannerExecutionSignal(best){
   const closed=(S.c||[]).slice(0,-1);
@@ -3959,7 +3859,7 @@ async function autoRotateAndReview(best){
     setRotationStatus(`KANDIDAT TERPILIH · ${S.symbol.replace('USDT','/USDT')} · ${best.side} · validasi live…`,'wait');
     const mtf=await confirmMultiTimeframe(S.symbol,best.side);
     const mtfText=mtf.checks.map(x=>`${x.tf}:${x.side}`).join(' · ');
-    if(!mtf.aligned){AUTO_ENGINE_STATE='WAIT';setRotationStatus(`ENTRY DITAHAN · tidak ada timeframe yang searah · ${mtfText}`,'wait');return;}
+    if(!mtf.aligned){AUTO_ENGINE_STATE='WAIT';setRotationStatus(`ENTRY DITAHAN · MTF minimum belum tercapai · ${mtfText}`,'wait');return;}
     // V6.18.12: the scanner's fresh MTF result is now the execution snapshot.
     // The old browser S.mtf cache could belong to the previous chart symbol and
     // incorrectly veto a valid scanner candidate after an automatic rotation.
@@ -3983,7 +3883,7 @@ async function autoRotateAndReview(best){
     const riskPlan=buildSmartRiskPlan(signal);
     const quality=getSignalQuality(signal,scannerReadiness,riskPlan);
     if(!riskPlan.valid||Number(riskPlan.rr1||0)<OPPORTUNITY_MIN_RR){AUTO_ENGINE_STATE='WAIT';setRotationStatus(`ENTRY DITAHAN · risk plan/R:R belum valid · R:R ${Number(riskPlan.rr1||0).toFixed(1)} < ${OPPORTUNITY_MIN_RR}`,'wait');return;}
-    if(Number(best.quality||0)<OPPORTUNITY_MIN_QUALITY || Number(best.score||0)<OPPORTUNITY_MIN_SCORE || Number(best.gap||0)<OPPORTUNITY_MIN_GAP){AUTO_ENGINE_STATE='WAIT';setRotationStatus(`ENTRY DITAHAN · kandidat belum melewati minimum aktif · quality ${Number(best.quality||0)}/100 · score ${Number(best.score||0)}/100 · gap ${Number(best.gap||0)}`,'wait');return;}
+    if(Number(best.quality||0)<OPPORTUNITY_MIN_QUALITY || Number(best.score||0)<OPPORTUNITY_MIN_SCORE){AUTO_ENGINE_STATE='WAIT';setRotationStatus(`ENTRY DITAHAN · kandidat belum melewati minimum aktif · quality ${Number(best.quality||0)}/100 · score ${Number(best.score||0)}/100`,'wait');return;}
     // Scanner + MTF + timing + correlation + server-side risk are now the
     // execution gates. The frozen Signal Drop forecast is informational and
     // must not veto this live candidate.
@@ -3992,10 +3892,7 @@ async function autoRotateAndReview(best){
     setRotationStatus(`ENTRY READY · ${S.symbol.replace('USDT','/USDT')} · ${best.side} · mengirim order Binance…`,'wait');
     AUTO_ENGINE_STATE='ORDER_PENDING';
     const side=best.side==='BUY'?'LONG':'SHORT';
-    const adaptive=adaptiveRiskForSignal({...signal,quality,scannerQuality:best.quality});
-    AUTO_EXECUTION_CONTEXT={...AUTO_EXECUTION_CONTEXT,adaptiveRisk:adaptive};
-    setRotationStatus(`ENTRY READY · risk adaptif ${adaptive.riskPct.toFixed(2)}% · edge ${adaptive.edge.ev==null?'data pending':adaptive.edge.ev.toFixed(2)+'R'}`,'good');
-    await order(side,{auto:true,signal,scannerValidated:true,autoRiskPct:adaptive.riskPct});
+    await order(side,{auto:true,signal,scannerValidated:true});
     await refreshAccount();
     const p=S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0?S.accountPosition:null;
     if(!p)throw Error('Order selesai tetapi posisi Binance belum terdeteksi.');
