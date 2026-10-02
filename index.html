@@ -361,6 +361,35 @@ body[data-view="dashboard"] .workspace .tabs{position:sticky;top:0;z-index:8;box
   body:not([data-view=dashboard]) .workspace>.grid{grid-template-columns:1fr!important}
 }
 </style>
+
+<style id="v6183-clean-ui">
+/* V6.18.4 — compact dashboard folders */
+#featureDashboardV601{display:block}
+#featureDashboardV601 .fdSection{margin-top:7px}
+.v6183Folder{border:1px solid #173149;border-radius:11px;background:#06101a;overflow:hidden;margin-top:7px}
+.v6183FolderHead{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 11px;border:0;background:linear-gradient(180deg,#0a1722,#07111a);color:#dce7ef;font:800 10px Inter,system-ui,sans-serif;text-align:left;cursor:pointer}
+.v6183FolderHead .v6183Left{display:flex;align-items:center;gap:8px;min-width:0}
+.v6183FolderHead .v6183Icon{font-size:12px;color:#d9b56c}
+.v6183FolderHead .v6183Meta{font-size:8px;color:#71879c;font-weight:500;white-space:nowrap}
+.v6183FolderHead .v6183Chevron{color:#d9b56c;transition:transform .16s}
+.v6183Folder.open .v6183Chevron{transform:rotate(180deg)}
+.v6183FolderBody{display:none;padding:7px}
+.v6183Folder.open .v6183FolderBody{display:block}
+.v6183FolderBody>.fdSection:first-child{margin-top:0}
+.v6183DashSummary{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.v6183DashSummary .fdHero{margin:0}
+.v6183DashSummary .fdStats{margin:0}
+#v6183FeatureMap .fdSection{margin:0}
+#v6183FeatureMap .fdGrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(min-width:900px){
+  #v6183FeatureMap .fdGrid{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media(max-width:600px){
+  .v6183DashSummary{grid-template-columns:1fr}
+  #v6183FeatureMap .fdGrid{grid-template-columns:1fr}
+  .v6183FolderHead{min-height:40px}
+}
+</style>
 </head><body>
 <nav class="appRail" aria-label="Navigasi Obsidian Futures">
   <div class="railBrand"><div class="railMark">◆</div><div><b>OBSIDIAN</b><span>FUTURES</span></div></div>
@@ -502,7 +531,7 @@ body[data-view="dashboard"] .workspace .tabs{position:sticky;top:0;z-index:8;box
   .grid main{padding:8px}
 }
 </style>
-<script src="/app-v6.18.js"></script>
+<script src="/app-v6.18.4.js"></script>
 
 <script>
 (function(){
@@ -868,4 +897,119 @@ body{min-width:0}
 .workspace>.grid>main{min-width:0}
 
 </style>
+
+<script id="v6183-clean-dashboard">
+(function(){
+  const q=(s,r=document)=>r.querySelector(s);
+  const qa=(s,r=document)=>Array.from(r.querySelectorAll(s));
+
+  function mkFolder(title,meta,node,open,icon){
+    const box=document.createElement('section');
+    box.className='v6183Folder'+(open?' open':'');
+    const head=document.createElement('button');
+    head.type='button';
+    head.className='v6183FolderHead';
+    head.innerHTML='<span class="v6183Left"><span class="v6183Icon">'+icon+'</span><span>'+title+'</span></span><span style="display:flex;align-items:center;gap:8px"><span class="v6183Meta">'+(meta||'')+'</span><span class="v6183Chevron">▼</span></span>';
+    const body=document.createElement('div');
+    body.className='v6183FolderBody';
+    if(node) body.appendChild(node);
+    box.append(head,body);
+    head.addEventListener('click',()=>{
+      const was=box.classList.contains('open');
+      const parent=box.parentElement;
+      if(parent) qa(':scope > .v6183Folder.open',parent).forEach(x=>{if(x!==box)x.classList.remove('open')});
+      box.classList.toggle('open',!was);
+    });
+    return box;
+  }
+
+  function compactDashboard(){
+    const h=q('#featureDashboardV601');
+    if(!h || h.dataset.v6183==='1') return false;
+
+    // The dashboard renderer creates these five large modules after the feature map.
+    const moduleIds=[
+      ['marketScannerV608','🔎 MARKET SCANNER','dynamic futures rotation'],
+      ['adaptiveLearningV612','🧠 ADAPTIVE LEARNING','paper learning + statistics'],
+      ['smartEntryV613','🎯 SMART ENTRY','timing + correlation guard'],
+      ['positionManagerV614','🛡️ POSITION MANAGER','break-even + trailing + exit'],
+      ['paperEngineV615','🤖 PAPER AUTO ENGINE','simulation only']
+    ];
+
+    // Wait until all module containers have been rendered.
+    const ready=moduleIds.every(x=>q('#'+x[0]));
+    if(!ready) return false;
+
+    h.dataset.v6183='1';
+
+    // Keep the top decision + stats compact and always visible.
+    const hero=q(':scope > .fdHero',h);
+    const stats=q(':scope > .fdStats',h);
+    const featureMap=qa(':scope > .fdSection',h).find(x=>q('.fdGrid',x));
+    const checklist=qa(':scope > .fdSection',h).find(x=>q('.fdChecklist',x) || q('.fdChecks',x));
+
+    // Move feature map and checklist into a single closed "Ringkasan & Modul".
+    const summaryHost=document.createElement('div');
+    summaryHost.className='v6183DashSummary';
+    if(hero) summaryHost.appendChild(hero);
+    if(stats) summaryHost.appendChild(stats);
+
+    const top=document.createElement('div');
+    top.className='v6183Folder open';
+    const topHead=document.createElement('button');
+    topHead.type='button';
+    topHead.className='v6183FolderHead';
+    topHead.innerHTML='<span class="v6183Left"><span class="v6183Icon">●</span><span>RINGKASAN SISTEM</span></span><span class="v6183Meta">status + keputusan</span>';
+    const topBody=document.createElement('div');
+    topBody.className='v6183FolderBody';
+    topBody.appendChild(summaryHost);
+    top.append(topHead,topBody);
+    topHead.onclick=()=>top.classList.toggle('open');
+
+    // Insert top summary first.
+    h.prepend(top);
+
+    if(featureMap){
+      const f=mkFolder('📦 FEATURE MAP','12 modul',featureMap,false,'▸');
+      f.id='v6183FeatureMap';
+      h.appendChild(f);
+    }
+
+    const modulesHost=document.createElement('div');
+    modulesHost.id='v6183AutomationFolders';
+
+    moduleIds.forEach(([id,title,meta],idx)=>{
+      const outer=q('#'+id,h)?.closest('.fdSection');
+      if(!outer) return;
+      modulesHost.appendChild(mkFolder(title,meta,outer,idx===0,'▸'));
+    });
+
+    if(checklist){
+      modulesHost.appendChild(mkFolder('✅ CEK KESIAPAN','data + safety + paper',checklist,false,'▸'));
+    }
+    h.appendChild(modulesHost);
+
+    // Remove any old empty wrappers left by the renderer.
+    qa(':scope > .fdSection',h).forEach(x=>{
+      if(!x.querySelector('#marketScannerV608,#adaptiveLearningV612,#smartEntryV613,#positionManagerV614,#paperEngineV615,.fdGrid,.fdChecks')) x.remove();
+    });
+
+    return true;
+  }
+
+  function watch(){
+    if(compactDashboard()) return;
+    const content=q('#content');
+    if(!content) return setTimeout(watch,250);
+    const obs=new MutationObserver(()=>{
+      if(compactDashboard()) obs.disconnect();
+    });
+    obs.observe(content,{childList:true,subtree:true});
+    setTimeout(()=>obs.disconnect(),10000);
+  }
+
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',watch,{once:true});
+  else setTimeout(watch,150);
+})();
+</script>
 </body></html>
