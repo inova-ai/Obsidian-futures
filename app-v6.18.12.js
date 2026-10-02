@@ -3940,6 +3940,39 @@ function buildScannerExecutionSignal(best){
     scannerCandidate:true,scannerQuality:Number(best?.quality||0),generatedAt:Date.now()};
 }
 
+async function autoScanAndEnter(candidates){
+  const list=(Array.isArray(candidates)?candidates:[])
+    .filter(x=>x&&['BUY','SELL'].includes(x.side))
+    .filter(x=>Number(x.score||0)>=OPPORTUNITY_MIN_SCORE&&Number(x.quality||0)>=OPPORTUNITY_MIN_QUALITY)
+    .slice(0,8);
+  if(!list.length){setRotationStatus('SCAN · belum ada BUY/SELL yang memenuhi minimum peluang','wait');return;}
+  if(S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0){setRotationStatus('ROTASI DITAHAN · posisi masih terbuka','wait');return;}
+  // IMPORTANT: scan -> find BUY/SELL -> rotate -> enter. If one candidate fails
+  // a live safety check, immediately try the next BUY/SELL candidate instead of
+  // rotating to a pair and leaving it sitting in WAIT.
+  for(const candidate of list){
+    if(!AUTO_ENTRY||MANUAL_ENTRY_STOP||autoBusy||autoProtectBusy)return;
+    if(S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0)return;
+    try{
+      setRotationStatus(`SIGNAL ${candidate.side} · ${candidate.symbol.replace('USDT','/USDT')} · scanner ${candidate.score}/100 · pindah untuk ENTRY…`,'good');
+      if(candidate.symbol!==S.symbol){
+        const changed=await switchMarketForAuto(candidate.symbol);
+        if(!changed)continue;
+      }
+      await autoRotateAndReview(candidate);
+      const p=S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0?S.accountPosition:null;
+      if(p)return;
+      // autoRotateAndReview can reject a candidate; continue with the next
+      // directional candidate from the same scan.
+    }catch(e){
+      setRotationStatus(`KANDIDAT ${candidate.symbol} ${candidate.side} gagal · lanjut kandidat berikutnya`,'wait');
+    }
+  }
+  if(!S.accountPosition||Math.abs(Number(S.accountPosition.positionAmt||0))===0){
+    setRotationStatus('SCAN SELESAI · belum ada BUY/SELL yang lolos safety execution','wait');
+  }
+}
+
 async function autoRotateAndReview(best){
   const paperRun=!!(PAPER_ENGINE.enabled&&PAPER_ENABLED);
   if((!paperRun&&(!AUTO_ENTRY||!AUTO_ROTATION))||MANUAL_ENTRY_STOP||autoBusy||autoProtectBusy||!best||best.quality<AUTO_ROTATE_MIN_QUALITY)return;
@@ -3983,7 +4016,7 @@ async function autoRotateAndReview(best){
     const riskPlan=buildSmartRiskPlan(signal);
     const quality=getSignalQuality(signal,scannerReadiness,riskPlan);
     if(!riskPlan.valid||Number(riskPlan.rr1||0)<OPPORTUNITY_MIN_RR){AUTO_ENGINE_STATE='WAIT';setRotationStatus(`ENTRY DITAHAN · risk plan/R:R belum valid · R:R ${Number(riskPlan.rr1||0).toFixed(1)} < ${OPPORTUNITY_MIN_RR}`,'wait');return;}
-    if(Number(best.quality||0)<OPPORTUNITY_MIN_QUALITY || Number(best.score||0)<OPPORTUNITY_MIN_SCORE || Number(best.gap||0)<OPPORTUNITY_MIN_GAP){AUTO_ENGINE_STATE='WAIT';setRotationStatus(`ENTRY DITAHAN · kandidat belum melewati minimum aktif · quality ${Number(best.quality||0)}/100 · score ${Number(best.score||0)}/100 · gap ${Number(best.gap||0)}`,'wait');return;}
+    if(Number(best.quality||0)<OPPORTUNITY_MIN_QUALITY || Number(best.score||0)<OPPORTUNITY_MIN_SCORE){AUTO_ENGINE_STATE='WAIT';setRotationStatus(`ENTRY DITAHAN · kandidat belum melewati minimum aktif · quality ${Number(best.quality||0)}/100 · score ${Number(best.score||0)}/100`,'wait');return;}
     // Scanner + MTF + timing + correlation + server-side risk are now the
     // execution gates. The frozen Signal Drop forecast is informational and
     // must not veto this live candidate.
@@ -4021,14 +4054,16 @@ async function runMarketScanner(){
     out.push(...rows);
     h.querySelector('.scannerStatus')?.replaceChildren(document.createTextNode(`Memindai market ${Math.min(i+batch.length,SCANNER_SYMBOLS.length)}/${SCANNER_SYMBOLS.length}…`));
   }SCANNER_ROWS=out.filter(x=>x.ok).sort((a,b)=>(b.quality-a.quality)||(b.score-a.score)||(Math.abs(b.change24h||0)-Math.abs(a.change24h||0)));
-  const candidates=SCANNER_ROWS.filter(x=>x.score>=50&&x.side!=='WAIT').slice(0,8);
+  // AUTO ENTRY: only rotate when the scanner has a real BUY/SELL direction.
+  // Never rotate just because a pair ranks high; the next action must be entry.
+  const candidates=SCANNER_ROWS.filter(x=>x.score>=OPPORTUNITY_MIN_SCORE&&x.quality>=OPPORTUNITY_MIN_QUALITY&&['BUY','SELL'].includes(x.side)).slice(0,8);
   const list=candidates.length?candidates.map((x,i)=>`<div class="scannerRow"><div><b>${i+1}. ${x.symbol.replace('USDT','/USDT')}</b><span>${x.side} · ${x.regime?.label||'—'}</span></div><div><b>${x.quality}/100</b><span>Teknikal ${x.score}/100 · OI ${x.openInterest?(x.openInterest>=1000000?(x.openInterest/1000000).toFixed(1)+'M':x.openInterest.toFixed(0)):'—'} · Funding ${x.fundingRate!=null?(x.fundingRate*100).toFixed(3)+'%':'—'}</span></div><div><b>${x.rsi==null?'—':x.rsi.toFixed(0)}</b><span>RSI · ADX ${x.adx==null?'—':x.adx.toFixed(0)} · 24j ${x.change24h==null?'—':(x.change24h>=0?'+':'')+x.change24h.toFixed(1)+'%'} · Spread ${x.spreadPct?x.spreadPct.toFixed(3)+'%':'—'}</span></div><div class="scannerReason"><b>${x.entry}</b> · ${x.reason}<br><span>${scannerRiskText(x)}</span></div></div>`).join(''):'<div class="note">Belum ada setup yang cukup berkualitas. Sistem tidak memaksa entry.</div>';
-  const top=SCANNER_ROWS.slice(0,10).map(x=>`${x.symbol} ${x.side} ${x.quality}`).join(' · '), best=SCANNER_ROWS[0];
+  const top=SCANNER_ROWS.slice(0,10).map(x=>`${x.symbol} ${x.side} ${x.quality}`).join(' · '), best=candidates[0]||null;
   h.innerHTML=`<div class="scannerHead"><div><span class="label">V6.18.12 OPPORTUNITY-FIRST FUTURES SCANNER</span><b>Mencari market Futures aktif lalu memilih setup terbaik</b><div class="scannerStatus">${candidates.length} kandidat · diperbarui ${new Date().toLocaleTimeString()}</div></div><div class="g2"><button class="btn active" id="scannerRefresh">SCAN SEKARANG</button><button class="btn ${AUTO_ROTATION?'long':''}" id="autoRotationBtn">SCAN AUTO: ${AUTO_ROTATION?'ON':'OFF'}</button><button class="btn ${PAPER_AUTO_ROTATION?'active':''}" id="paperAutoRotationBtn">PAPER AUTO: ${PAPER_AUTO_ROTATION?'ON':'OFF'}</button></div></div><div class="scannerSafe">🛡 <b>Rotasi otomatis hanya aktif saat AUTO juga ON.</b> Sistem tidak berpindah market jika masih ada posisi terbuka. Entry tetap melewati safety gate, tetapi threshold peluang dibuat adaptif agar tidak pasif.</div><div id="autoRotationStatus" class="note wait">${PAPER_ENGINE.enabled?'PAPER AUTO sedang mencari peluang secara aman…':AUTO_ENTRY&&AUTO_ROTATION?'AUTO LIVE aktif · scanner → validasi → order → posisi → chart':'PAPER siap · aktifkan PAPER AUTO ENGINE untuk uji otomatis'}</div><div class="scannerStats"><div><small>MARKET DIPINDAI</small><b>${SCANNER_ROWS.length}/${SCANNER_SYMBOLS.length}</b><span>dinamis</span></div><div><small>KANDIDAT</small><b>${candidates.length}</b></div><div><small>MARKET TERPILIH</small><b>${best?best.symbol.replace('USDT','/USDT'):'—'}</b></div><div><small>KUALITAS</small><b>${best?.quality||0}/100</b></div></div><div class="scannerList">${list}</div><div class="scannerReview"><div><small>KANDIDAT TERATAS</small><b>${best?best.symbol.replace('USDT','/USDT')+' · '+best.side:'—'}</b><span>${best?best.regime?.label+' · kualitas '+best.quality+'/100':'Belum ada kandidat'}</span></div><div><small>GATE</small><b>${best?.entry||'TUNGGU'}</b><span>${best?scannerRiskText(best):'Menunggu scan'}</span></div><div><small>ALASAN</small><b>${best?.reason||'—'}</b><span>Market dipilih berdasarkan ranking scan + likuiditas/funding/OI/spread; entry tetap diverifikasi ulang.</span></div></div><div class="note" style="margin-top:8px">Scanner memilih market secara dinamis berdasarkan likuiditas, pergerakan, funding, open interest, spread, dan kualitas setup. Kenaikan ekstrem tidak otomatis berarti BUY; sistem mencari peluang yang cukup layak, bukan menunggu setup sempurna. Safety dan risk gate tetap aktif. ${top||'Belum ada data.'}</div>`;
   $('scannerRefresh')?.addEventListener('click',runMarketScanner);
   $('autoRotationBtn')?.addEventListener('click',()=>{AUTO_ROTATION=!AUTO_ROTATION;localStorage.setItem('obsidian_auto_rotation',AUTO_ROTATION?'1':'0');runMarketScanner()});$('paperAutoRotationBtn')?.addEventListener('click',()=>{PAPER_AUTO_ROTATION=!PAPER_AUTO_ROTATION;localStorage.setItem('obsidian_paper_auto_rotation',PAPER_AUTO_ROTATION?'1':'0');runMarketScanner()});
   h.dataset.loading='0';SCANNER_BUSY=false;SCANNER_LAST_SCAN=Date.now();
-  if(AUTO_ENTRY&&AUTO_ROTATION&&best)await autoRotateAndReview(best);
+  if(AUTO_ENTRY&&AUTO_ROTATION&&candidates.length)await autoScanAndEnter(candidates);
   clearTimeout(SCANNER_TIMER);SCANNER_TIMER=setTimeout(()=>{if(AUTO_ENTRY&&AUTO_ROTATION)runMarketScanner()},30000);
 }
 function renderMarketScanner(){const h=$('marketScannerV608');if(!h)return;h.innerHTML=`<div class="scannerHead"><div><span class="label">V6.18 AUTO MARKET ROTATION</span><b>Scanner → ranking peluang → MTF → risk → entry</b><div class="scannerStatus">Siap memindai hingga 72 market Futures dinamis.</div></div><button class="btn active" id="scannerRefresh">SCAN SEKARANG</button></div><div class="scannerSafe">🛡 Rotasi otomatis tidak memaksa entry. AUTO harus ON, posisi harus kosong, dan seluruh safety gate harus lolos.</div>`;$('scannerRefresh')?.addEventListener('click',runMarketScanner);runMarketScanner();}
