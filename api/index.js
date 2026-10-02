@@ -14,7 +14,7 @@ app.use((req,res,next)=>{res.setHeader('X-Content-Type-Options','nosniff');res.s
 app.use(express.json({limit:'1mb'})); 
 const rate=new Map();
 function rateLimit(req,res,next){const key=(req.ip||'unknown')+'|'+req.path,now=Date.now();let x=rate.get(key);if(!x||now-x.t>60000)x={t:now,n:0};x.n++;rate.set(key,x);if(x.n>120)return res.status(429).json({error:'Rate limit exceeded'});next()}
-app.get('/api',(req,res)=>res.json({ok:true,service:'obsidian-futures',version:'6.05.0-market-boot-fix'}));
+app.get('/api',(req,res)=>res.json({ok:true,service:'obsidian-futures',version:'6.18.0-final-trial'}));
 app.use('/api',rateLimit);
 
 const TRADING_MODE=String(process.env.TRADING_MODE|| (process.env.ENABLE_LIVE_TRADING==='true'?'live':'demo')).trim().toLowerCase();
@@ -175,7 +175,7 @@ app.get('/api/runtime',(_,r)=>r.json({
   bybitBase:BYBIT_BASE
 }));
 
-app.get('/api/health',async(_,r)=>{try{let db='not-configured';if(pool){await ensureDb();db='postgres'}r.json({ok:true,version:'6.05.0-market-boot-fix',live:LIVE,tradingMode:TRADING_MODE,binanceEnvironment:IS_DEMO?'demo':'live',binanceBase:BASE,binanceWs:WS_BASE,userWs:USER_WS_BASE,userWsMode:IS_DEMO?'legacy-listen-key':'private-routed',marketBase:MARKET_BASE,marketWs:MARKET_WS_BASE,publicWs:PUBLIC_WS_BASE,binanceCredentialsConfigured:!!(ENV_BINANCE_API_KEY&&ENV_BINANCE_API_SECRET),killSwitch:await getKillSwitch(),maxLeverage:MAXLEV,maxRiskPct:MAXRISK,dailyDrawdownPct:MAX_DD,db,auth:pool?'postgres':(ENV_ADMIN_USER&&ENV_ADMIN_PASSWORD?'env-admin':'unconfigured')})}catch(e){r.status(503).json({ok:false,db:'down',auth:ENV_ADMIN_USER&&ENV_ADMIN_PASSWORD?'env-admin':'unconfigured',error:e.message})}});
+app.get('/api/health',async(_,r)=>{try{let db='not-configured';if(pool){await ensureDb();db='postgres'}r.json({ok:true,version:'6.18.0-final-trial',live:LIVE,tradingMode:TRADING_MODE,binanceEnvironment:IS_DEMO?'demo':'live',binanceBase:BASE,binanceWs:WS_BASE,userWs:USER_WS_BASE,userWsMode:IS_DEMO?'legacy-listen-key':'private-routed',marketBase:MARKET_BASE,marketWs:MARKET_WS_BASE,publicWs:PUBLIC_WS_BASE,binanceCredentialsConfigured:!!(ENV_BINANCE_API_KEY&&ENV_BINANCE_API_SECRET),killSwitch:await getKillSwitch(),maxLeverage:MAXLEV,maxRiskPct:MAXRISK,dailyDrawdownPct:MAX_DD,db,auth:pool?'postgres':(ENV_ADMIN_USER&&ENV_ADMIN_PASSWORD?'env-admin':'unconfigured')})}catch(e){r.status(503).json({ok:false,db:'down',auth:ENV_ADMIN_USER&&ENV_ADMIN_PASSWORD?'env-admin':'unconfigured',error:e.message})}});
 app.get('/api/auth/status',async(qr,r)=>{try{if(pool){try{await ensureDb();const u=(await q('SELECT username FROM users WHERE id=1'))[0];return r.json({configured:!!u,authenticated:!!optionalAuth(qr),username:u?.username||null,mode:'postgres'})}catch(e){if(!ENV_ADMIN_USER||!ENV_ADMIN_PASSWORD)throw e}}if(!ENV_ADMIN_USER||!ENV_ADMIN_PASSWORD)throw Error('Authentication is not configured. Set ADMIN_USERNAME, ADMIN_PASSWORD and MASTER_KEY in Vercel.');r.json({configured:true,authenticated:!!optionalAuth(qr),username:ENV_ADMIN_USER,mode:'env'})}catch(e){r.status(503).json({error:e.message,code:'AUTH_NOT_CONFIGURED'})}});
 app.post('/api/auth/setup',async(qr,r)=>{try{if(!pool)throw Error('Database belum dikonfigurasi. Untuk mode Vercel tanpa database, isi ADMIN_USERNAME, ADMIN_PASSWORD dan MASTER_KEY lalu gunakan Login.');await ensureDb();if((await q('SELECT id FROM users WHERE id=1')).length)throw Error('User already configured');const username=String(qr.body.username||'admin').trim(),password=String(qr.body.password||'');if(!username||password.length<12)throw Error('Username required and password must be at least 12 characters');const ph=passwordHash(password);await exec('INSERT INTO users(id,username,salt,password_hash,created_at) VALUES(1,$1,$2,$3,$4)',[username,ph.salt,ph.hash,Date.now()]);await audit('AUTH_SETUP',username);const token=makeToken(username);r.json({token,username,expiresInSec:SESSION_TTL/1000,mode:'postgres'})}catch(e){r.status(400).json({error:e.message})}});
 app.post('/api/auth/login',async(qr,r)=>{try{const suppliedUser=String(qr.body.username||'').trim(),suppliedPass=String(qr.body.password||'');let username='';if(pool){try{await ensureDb();const u=(await q('SELECT * FROM users WHERE id=1'))[0];if(u){const got=crypto.scryptSync(suppliedPass,u.salt,64,{N:16384,r:8,p:1});if(!crypto.timingSafeEqual(got,Buffer.from(u.password_hash,'hex')))throw Error('Invalid credentials');username=u.username;const row=(await q('SELECT totp_enc FROM credentials WHERE id=1'))[0];if(row?.totp_enc&&String(qr.body.code||'').trim()!==totp(dec(row.totp_enc)))throw Error('Valid 2FA code required')}}catch(e){if(!ENV_ADMIN_USER||!ENV_ADMIN_PASSWORD||e.message==='Invalid credentials'||e.message==='Valid 2FA code required')throw e}}if(!username){if(!ENV_ADMIN_USER||!ENV_ADMIN_PASSWORD)throw Error('Run setup first or configure ADMIN_USERNAME and ADMIN_PASSWORD in Vercel');if(suppliedUser!==ENV_ADMIN_USER||suppliedPass!==ENV_ADMIN_PASSWORD)throw Error('Invalid credentials');username=ENV_ADMIN_USER}const token=makeToken(username);if(pool)await audit('AUTH_LOGIN',username);r.json({token,username,expiresInSec:SESSION_TTL/1000,mode:pool?'postgres':'env'})}catch(e){r.status(401).json({error:e.message})}});
@@ -215,6 +215,29 @@ app.get('/api/market/ticker',async(qr,r)=>{
     }
   }catch(e){r.status(400).json({error:e.message})}
 });
+app.get('/api/futures-markets',async(qr,r)=>{
+  try{
+    const [info,tickers]=await Promise.all([publicBinance('/fapi/v1/exchangeInfo'),publicBinance('/fapi/v1/ticker/24hr')]);
+    const stable=new Set(['USDCUSDT','BUSDUSDT','FDUSDUSDT','TUSDUSDT','USDPUSDT','DAIUSDT']);
+    const meta=new Map((info.symbols||[]).filter(x=>x.status==='TRADING'&&x.contractType==='PERPETUAL'&&x.quoteAsset==='USDT').map(x=>[x.symbol,x]));
+    const rows=(Array.isArray(tickers)?tickers:[]).filter(x=>meta.has(x.symbol)&&!stable.has(x.symbol)).map(x=>{
+      const m=meta.get(x.symbol);
+      return {symbol:x.symbol,lastPrice:Number(x.lastPrice||0),priceChangePercent:Number(x.priceChangePercent||0),quoteVolume:Number(x.quoteVolume||0),volume:Number(x.volume||0),count:Number(x.count||0),baseAsset:m.baseAsset};
+    }).filter(x=>x.lastPrice>0&&x.quoteVolume>0);
+    const liquid=[...rows].sort((a,b)=>b.quoteVolume-a.quoteVolume).slice(0,24);
+    const movers=[...rows].sort((a,b)=>Math.abs(b.priceChangePercent)-Math.abs(a.priceChangePercent)).slice(0,24);
+    const gainers=[...rows].sort((a,b)=>b.priceChangePercent-a.priceChangePercent).slice(0,24);
+    const merged=new Map(); [...liquid,...movers,...gainers].forEach(x=>merged.set(x.symbol,x));
+    const out=[...merged.values()].sort((a,b)=>{
+      const am=Math.abs(a.priceChangePercent),bm=Math.abs(b.priceChangePercent);
+      const av=Math.log10(a.quoteVolume+1),bv=Math.log10(b.quoteVolume+1);
+      return (bm*0.7+bv*4)-(am*0.7+av*4);
+    }).slice(0,36);
+    r.setHeader('Cache-Control','no-store');
+    r.json({ok:true,count:out.length,updatedAt:Date.now(),symbols:out});
+  }catch(e){r.status(400).json({error:e.message})}
+});
+app.get('/api/futures-metrics',async(qr,r)=>{try{const symbols=String(qr.query.symbols||'').split(',').map(x=>String(x).toUpperCase().trim()).filter(Boolean).slice(0,24);const metrics=await Promise.all(symbols.map(async symbol=>{try{const [p,oi,b]=await Promise.all([publicBinance('/fapi/v1/premiumIndex',{symbol}),publicBinance('/fapi/v1/openInterest',{symbol}),publicBinance('/fapi/v1/ticker/bookTicker',{symbol})]);const bid=Number(b.bidPrice||0),ask=Number(b.askPrice||0),mid=(bid+ask)/2;return {symbol,fundingRate:Number(p.lastFundingRate||0),markPrice:Number(p.markPrice||0),indexPrice:Number(p.indexPrice||0),openInterest:Number(oi.openInterest||0),bidPrice:bid,askPrice:ask,spreadPct:mid>0?((ask-bid)/mid)*100:0};}catch(e){return {symbol,error:e?.message||'metrics unavailable'};}}));r.setHeader('Cache-Control','no-store');r.json({ok:true,updatedAt:Date.now(),metrics});}catch(e){r.status(400).json({error:e.message})}});
 app.get('/api/exchange-info',async(qr,r)=>{try{const all=await publicBinance('/fapi/v1/exchangeInfo');const s=all.symbols.find(x=>x.symbol===sym(qr.query.symbol));if(!s)throw Error('Symbol not found');r.json(s)}catch(e){r.status(400).json({error:e.message})}});
 app.get('/api/force-orders',async(qr,r)=>{try{r.json(await publicBinance('/fapi/v1/forceOrders',{symbol:sym(qr.query.symbol),limit:20}))}catch(e){r.status(400).json({error:e.message})}});
 app.get('/api/ai/trend',async(qr,r)=>{try{const symbol=sym(qr.query.symbol||'BTCUSDT'),interval=qr.query.interval||'5m',x=await marketKlines(symbol,interval,150);r.setHeader('X-Market-Data-Source',x.source);r.json({symbol,interval,...aiTrend(x.rows),source:x.source,updatedAt:Date.now()})}catch(e){r.status(400).json({error:e.message})}});
