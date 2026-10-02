@@ -142,3 +142,6 @@ Replace the previous package with this ZIP. Keep the existing Binance credential
 - Historical hit rate nudges signal confidence; it never guarantees the next candle direction.
 - Adaptive OOS validation is available from the Uji Strategi tab.
 - Learning cache is rebuilt when the symbol/timeframe/last closed candle changes and can be reset manually.
+
+## V6.19 SIGNAL-FIRST AUTO FIX
+AUTO rotation is discovery-only. After switching to a candidate market, the engine reads the freshly loaded live BUY/SELL signal and attempts entry immediately. Scanner score/quality, MTF, timing, correlation and R:R are not entry vetoes in this mode; non-negotiable safety remains: AUTO enabled, no open position, capital protection/kill switch, usable SL/TP plan, server risk checks, Binance order response and position verification.

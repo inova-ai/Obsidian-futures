@@ -3941,38 +3941,81 @@ function buildScannerExecutionSignal(best){
 }
 
 async function autoScanAndEnter(candidates){
+  // V6.19 SIGNAL-FIRST FIX:
+  // Rotation is only a discovery mechanism. Once a pair is loaded, the
+  // CURRENT LIVE signal on that pair is the authoritative trigger. Do not
+  // make the user wait through scanner/MTF/timing/quality gates after BUY/SELL
+  // is actually visible. Keep only execution safety: AUTO ON, no open position,
+  // capital protection, a usable SL/TP plan, and Binance/server validation.
   const list=(Array.isArray(candidates)?candidates:[])
     .filter(x=>x&&['BUY','SELL'].includes(x.side))
-    .filter(x=>Number(x.score||0)>=OPPORTUNITY_MIN_SCORE&&Number(x.quality||0)>=OPPORTUNITY_MIN_QUALITY)
-    .slice(0,8);
-  if(!list.length){setRotationStatus('SCAN · belum ada BUY/SELL yang memenuhi minimum peluang','wait');return;}
+    .filter(x=>Number(x.score||0)>=OPPORTUNITY_MIN_SCORE)
+    .slice(0,12);
+  if(!list.length){setRotationStatus('SCAN · mencari pair dengan peluang BUY/SELL…','wait');return;}
   if(S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0){setRotationStatus('ROTASI DITAHAN · posisi masih terbuka','wait');return;}
-  // IMPORTANT: scan -> find BUY/SELL -> rotate -> enter. If one candidate fails
-  // a live safety check, immediately try the next BUY/SELL candidate instead of
-  // rotating to a pair and leaving it sitting in WAIT.
+
   for(const candidate of list){
     if(!AUTO_ENTRY||MANUAL_ENTRY_STOP||autoBusy||autoProtectBusy)return;
     if(S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0)return;
     try{
-      setRotationStatus(`SIGNAL ${candidate.side} · ${candidate.symbol.replace('USDT','/USDT')} · scanner ${candidate.score}/100 · pindah untuk ENTRY…`,'good');
+      setRotationStatus(`CARI SIGNAL · ${candidate.symbol.replace('USDT','/USDT')} · kandidat ${candidate.side} · pindah…`,'wait');
       if(candidate.symbol!==S.symbol){
         const changed=await switchMarketForAuto(candidate.symbol);
         if(!changed)continue;
       }
-      await autoRotateAndReview(candidate);
+
+      // Re-read the freshly loaded chart. The scanner candidate may be stale by
+      // the time the chart arrives; the visible live BUY/SELL signal is what we
+      // actually trade.
+      const live=getFinalSignal();
+      const liveSide=live?.side;
+      const liveScore=Number(live?.score||0);
+      if(!['BUY','SELL'].includes(liveSide) || liveScore<OPPORTUNITY_MIN_SCORE){
+        setRotationStatus(`LIHAT SIGNAL · ${S.symbol.replace('USDT','/USDT')} · ${liveSide||'WAIT'} ${liveScore}/100 · lanjut pair berikutnya`,'wait');
+        continue;
+      }
+
+      const plan=live.riskPlan||buildSmartRiskPlan(live);
+      if(!plan?.valid){
+        setRotationStatus(`SIGNAL ${liveSide} · ${S.symbol.replace('USDT','/USDT')} ${liveScore}/100 · risk plan belum siap · lanjut pair berikutnya`,'wait');
+        continue;
+      }
+
+      // Keep only the non-negotiable safety checks here. R:R, MTF alignment,
+      // timing, correlation, frozen forecast readiness and quality are NOT
+      // entry vetoes in Signal-First mode.
+      const cp=capitalProtectionCheck();
+      if(!cp.ok){setAutoStatus(cp.reason||'CAPITAL PROTECTION aktif','bad');return;}
+      if(S.kill){setAutoStatus('AUTO DITAHAN · KILL SWITCH aktif','bad');return;}
+
+      const signal={...live,riskPlan:plan,scannerCandidate:true,scannerQuality:Number(candidate.quality||0),generatedAt:Date.now()};
+      const adaptive=adaptiveRiskForSignal({...signal,quality:live.quality,scannerQuality:candidate.quality});
+      AUTO_EXECUTION_CONTEXT={symbol:S.symbol,side:liveSide,signal,quality:live.quality,mtf:null,at:Date.now(),candidate,signalFirst:true,adaptiveRisk:adaptive};
+      setAutoStatus(`AUTO ENTRY READY · ${S.symbol.replace('USDT','/USDT')} ${liveSide} · SIGNAL ${liveScore}/100`,'good');
+      setRotationStatus(`SIGNAL ${liveSide} TERDETEKSI · ${S.symbol.replace('USDT','/USDT')} · langsung ENTRY…`,'good');
+      AUTO_ENGINE_STATE='ORDER_PENDING';
+      const orderSide=liveSide==='BUY'?'LONG':'SHORT';
+      await order(orderSide,{auto:true,signal,scannerValidated:true,autoRiskPct:adaptive.riskPct});
+      await refreshAccount();
       const p=S.accountPosition&&Math.abs(Number(S.accountPosition.positionAmt||0))>0?S.accountPosition:null;
-      if(p)return;
-      // autoRotateAndReview can reject a candidate; continue with the next
-      // directional candidate from the same scan.
+      if(!p)throw Error('Order selesai tetapi posisi Binance belum terdeteksi.');
+      lastAutoSignalKey=`SIGNAL-FIRST:${S.symbol}:${liveSide}:${Math.floor(Date.now()/10000)}`;
+      try{localStorage.setItem('obsidian_auto_last_signal',lastAutoSignalKey)}catch{}
+      AUTO_ENGINE_STATE='POSITION_ACTIVE';
+      await followOpenPositionChart(p,'entry AUTO SIGNAL-FIRST terverifikasi');
+      setRotationStatus(`POSISI AKTIF · ${S.symbol.replace('USDT','/USDT')} · chart mengikuti posisi`,'good');
+      setAutoStatus(`AUTO AKTIF · ${Number(p.positionAmt)>0?'LONG':'SHORT'} ${S.symbol.replace('USDT','/USDT')} · posisi Binance terverifikasi`,'good');
+      return;
     }catch(e){
-      setRotationStatus(`KANDIDAT ${candidate.symbol} ${candidate.side} gagal · lanjut kandidat berikutnya`,'wait');
+      AUTO_ENGINE_STATE='WAIT';
+      setRotationStatus(`PAIR ${candidate.symbol.replace('USDT','/USDT')} · entry gagal · ${e?.message||'lanjut mencari signal'}`,'wait');
+      // Continue to the next BUY/SELL candidate in the same scan.
     }
   }
   if(!S.accountPosition||Math.abs(Number(S.accountPosition.positionAmt||0))===0){
-    setRotationStatus('SCAN SELESAI · belum ada BUY/SELL yang lolos safety execution','wait');
+    setRotationStatus('SCAN SELESAI · belum menemukan BUY/SELL live yang siap dieksekusi · scan berikutnya lanjut otomatis','wait');
   }
 }
-
 async function autoRotateAndReview(best){
   const paperRun=!!(PAPER_ENGINE.enabled&&PAPER_ENABLED);
   if((!paperRun&&(!AUTO_ENTRY||!AUTO_ROTATION))||MANUAL_ENTRY_STOP||autoBusy||autoProtectBusy||!best||best.quality<AUTO_ROTATE_MIN_QUALITY)return;
