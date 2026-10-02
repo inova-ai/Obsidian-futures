@@ -381,6 +381,42 @@ app.post('/api/live/close',auth,async(qr,r)=>{try{
   await audit('EXCHANGE_CLOSE',JSON.stringify({environment:IS_DEMO?'demo':'live',symbol:s,side,orderId:out.orderId,qty:q,realizedPnl,walletDelta,balanceBefore,balanceAfter,algoCancel,regularCancel}),qr.user);
   r.json({ok:true,mode:TRADING_MODE,exitPrice,entryPrice,quantity:filledQty,grossEstimate,realizedPnl,commissionUSDT,netRealizedAfterFee:realizedPnl-commissionUSDT,walletDelta,balanceBefore,balanceAfter,availableBefore,availableAfter,positionClosed:true,order:out,realizedIncome:realizedRows,tradeFills:orderTrades,canceled:{algo:algoCancel,regular:regularCancel}});
 }catch(e){r.status(400).json({error:e.message,code:e.code||'CLOSE_ERROR'})}});
+app.post('/api/live/partial-close',auth,async(qr,r)=>{try{
+  const s=sym(qr.body.symbol); const pct=Math.max(5,Math.min(90,Number(qr.body.percent||30))); await loadCredentials();
+  if(!KEY||!SECRET)throw Error('Binance API credential belum dikonfigurasi.');
+  if(await getKillSwitch())throw Error('Kill switch active');
+  const ps=await binance('/fapi/v3/positionRisk',{symbol:s},'GET',true); const p=(Array.isArray(ps)?ps:[]).find(x=>Math.abs(Number(x.positionAmt||0))>0);
+  if(!p)throw Error('Tidak ada posisi terbuka.');
+  const info=await binance('/fapi/v1/exchangeInfo',{},'GET',true),meta=info.symbols.find(x=>x.symbol===s),lot=meta?.filters?.find(x=>x.filterType==='LOT_SIZE');
+  const step=Number(lot?.stepSize||0.001),qty=Math.abs(Number(p.positionAmt||0)),closeQty=decimalFloor(qty*pct/100,step);
+  if(!(closeQty>0)||closeQty>=qty)throw Error('Partial close menghasilkan quantity tidak valid.');
+  const side=Number(p.positionAmt)>0?'SELL':'BUY';
+  const out=await binance('/fapi/v1/order',{symbol:s,side,type:'MARKET',quantity:decimalString(closeQty,step),reduceOnly:'true',newOrderRespType:'RESULT'},'POST',true);
+  await audit('PARTIAL_CLOSE',JSON.stringify({symbol:s,pct,requestedQty:qty*pct/100,closeQty,orderId:out.orderId}),qr.user);
+  r.json({ok:true,symbol:s,percent:pct,closedQty:closeQty,remainingQty:qty-closeQty,order:out});
+}catch(e){r.status(400).json({error:e.message,code:e.code||'PARTIAL_CLOSE_ERROR'})}});
+
+app.post('/api/live/adjust-protection',auth,async(qr,r)=>{try{
+  const s=sym(qr.body.symbol); const stop=Number(qr.body.stopLoss||0); const keepTp=qr.body.keepTakeProfit!==false; const take=Number(qr.body.takeProfit||0); await loadCredentials();
+  if(!KEY||!SECRET)throw Error('Binance API credential belum dikonfigurasi.'); if(await getKillSwitch())throw Error('Kill switch active'); if(!(stop>0))throw Error('Stop Loss baru tidak valid.');
+  const ps=await binance('/fapi/v3/positionRisk',{symbol:s},'GET',true); const p=(Array.isArray(ps)?ps:[]).find(x=>Math.abs(Number(x.positionAmt||0))>0); if(!p)throw Error('Tidak ada posisi terbuka.');
+  const entry=Number(p.entryPrice||0),long=Number(p.positionAmt)>0; if((long&&stop>=entry*1.01)||(!long&&stop<=entry*.99))throw Error('Stop protection berada pada sisi harga yang tidak aman.');
+  // Preserve an existing TAKE_PROFIT when the caller asks to keep it.
+  let preservedTp=take;
+  if(keepTp && !(preservedTp>0)){
+    const open=await binance('/fapi/v1/algoOpenOrders',{symbol:s},'GET',true).catch(()=>[]);
+    const arr=Array.isArray(open)?open:(Array.isArray(open?.orders)?open.orders:[]);
+    const tpRow=arr.find(x=>String(x.type||'').toUpperCase().includes('TAKE_PROFIT'));
+    preservedTp=Number(tpRow?.triggerPrice||tpRow?.price||tpRow?.stopPrice||0);
+  }
+  await cancelSymbolAlgoOrders(s);
+  const info=await binance('/fapi/v1/exchangeInfo',{},'GET',true),meta=info.symbols.find(x=>x.symbol===s),pf=meta?.filters?.find(x=>x.filterType==='PRICE_FILTER'),tick=Number(pf?.tickSize||0.01),priceText=v=>decimalString(decimalFloor(v,tick),tick),exit=long?'SELL':'BUY';
+  const sl=await binance('/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol:s,side:exit,type:'STOP_MARKET',triggerPrice:priceText(stop),closePosition:'true',workingType:'MARK_PRICE'},'POST',true);
+  let tp=null;
+  if(keepTp && preservedTp>0)tp=await binance('/fapi/v1/algoOrder',{algoType:'CONDITIONAL',symbol:s,side:exit,type:'TAKE_PROFIT_MARKET',triggerPrice:priceText(preservedTp),closePosition:'true',workingType:'MARK_PRICE'},'POST',true);
+  await audit('ADJUST_PROTECTION',JSON.stringify({symbol:s,stopLoss:stop,takeProfit:take,keepTakeProfit:keepTp}),qr.user); r.json({ok:true,symbol:s,stopLoss:stop,takeProfit:preservedTp,keepTakeProfit:keepTp,sl,tp});
+}catch(e){r.status(400).json({error:e.message,code:e.code||'PROTECTION_ADJUST_ERROR'})}});
+
 app.post('/api/live/order',auth,async(qr,r)=>{try{
   if(TRADING_MODE==='paper'||(TRADING_MODE==='live'&&!LIVE))throw Error('Exchange trading is disabled. Set TRADING_MODE=demo for Binance Demo or TRADING_MODE=live with ENABLE_LIVE_TRADING=true.');
   if(await getKillSwitch())throw Error('Kill switch active');
