@@ -77,7 +77,7 @@
       ]
     },
     {
-      "source": "/app-v6.18.11.js",
+      "source": "/app-v6.18.12.js",
       "headers": [
         {
           "key": "Cache-Control",

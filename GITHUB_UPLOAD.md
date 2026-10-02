@@ -1,4 +1,4 @@
-# Obsidian Futures V6.18.11 — GitHub Ready
+# Obsidian Futures V6.18.12 — GitHub Ready
 
 Bundle ini sudah dirapikan dan hanya berisi file runtime/deployment yang diperlukan. File versi lama, README historis, snippet, dan file percobaan dihapus agar upload via GitHub tidak melewati batas 100 file.
 
@@ -11,7 +11,7 @@ Bundle ini sudah dirapikan dan hanya berisi file runtime/deployment yang diperlu
 
 ## File utama
 - `index.html`
-- `app-v6.18.11.js`
+- `app-v6.18.12.js`
 - `api/index.js`
 - `index.js`
 - `package.json`
