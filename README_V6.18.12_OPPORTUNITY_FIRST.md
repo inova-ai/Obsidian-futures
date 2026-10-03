@@ -44,3 +44,10 @@ The AUTO engine remains opportunity-first and does not add a hard confidence gat
 - existing take-profit is preserved when protection is adjusted.
 
 Safety gates such as kill switch, capital protection, one-position rule, exchange sizing validation and Binance position verification remain active.
+
+
+## V6.19.1 — MTF sebagai konteks, bukan veto arah
+- Kandidat live BUY/SELL dari scanner tidak lagi ditolak hanya karena tidak ada timeframe yang searah.
+- MTF tetap ditampilkan sebagai konteks/caution untuk transparansi, tetapi tidak menjadi syarat unanimity.
+- Entry tetap harus lolos risk plan, sizing, kill switch/capital protection, pemeriksaan server, dan konfirmasi posisi Binance.
+- Tujuan perubahan: mengurangi WAIT yang disebabkan konflik antar-timeframe; bukan menjanjikan profit atau menghapus pengamanan order.
