@@ -163,6 +163,19 @@ body:before{background-image:linear-gradient(rgba(90,160,205,.025) 1px,transpare
 /* buttons — exact dashboard semantic colors */
 .btn.long,#quickLong,#long{background:linear-gradient(180deg,#16dfa1,#08bd82)!important;border:1px solid #25e6aa!important;color:#02130e!important;font-weight:900!important;box-shadow:0 7px 22px rgba(18,217,154,.12)!important}.btn.short,#quickShort,#short{background:linear-gradient(180deg,#ff5875,#ed3c5d)!important;border:1px solid #ff7189!important;color:#22030a!important;font-weight:900!important;box-shadow:0 7px 22px rgba(255,79,109,.11)!important}.btn.danger,#closePosition{background:rgba(255,79,109,.05)!important;border-color:rgba(255,79,109,.36)!important;color:#ff7890!important}.btn.long:hover,.btn.short:hover{filter:brightness(1.06);transform:translateY(-1px)}
 #autoTradePanel{background:linear-gradient(180deg,rgba(18,217,154,.07),rgba(5,17,24,.85))!important;border:1px solid rgba(18,217,154,.24)!important;border-radius:10px!important}#autoTradeBtn{border-color:rgba(18,217,154,.45)!important;color:var(--of-green)!important;background:rgba(18,217,154,.07)!important}
+/* V6.20 Auto Engine motion language */
+@keyframes enginePulse{0%,100%{box-shadow:0 0 0 0 rgba(22,223,161,.18),0 0 14px rgba(22,223,161,.08)}50%{box-shadow:0 0 0 5px rgba(22,223,161,0),0 0 24px rgba(22,223,161,.24)}}
+@keyframes engineSweep{0%{background-position:0% 50%}100%{background-position:200% 50%}}
+@keyframes engineDot{0%,100%{opacity:.35;transform:scale(.82)}50%{opacity:1;transform:scale(1.18)}}
+#autoTradePanel{position:relative;overflow:hidden}
+#autoTradePanel:before{content:"";position:absolute;inset:0 0 auto;height:2px;background:linear-gradient(90deg,transparent,#16dfa1,#f0ad32,#16dfa1,transparent);background-size:200% 100%;animation:engineSweep 4s linear infinite;pointer-events:none}
+#autoTradeBtn{transition:transform .2s ease,filter .2s ease,box-shadow .25s ease}
+#autoTradeBtn:hover{transform:translateY(-2px) scale(1.02);filter:brightness(1.14)}
+#autoTradeBtn.active,#autoTradeBtn.long{animation:enginePulse 2s ease-in-out infinite}
+#autoTradeBtn:active{transform:scale(.97)}
+#paperEngineV615 .fdSectionHead .btn.active{animation:enginePulse 2s ease-in-out infinite}
+.scannerStatus:before{content:"●";color:#16dfa1;margin-right:7px;animation:engineDot 1.4s ease-in-out infinite;display:inline-block}
+@media(prefers-reduced-motion:reduce){#autoTradePanel:before,#autoTradeBtn,.scannerStatus:before,#paperEngineV615 .fdSectionHead .btn.active{animation:none!important;transition:none!important}}
 /* right analysis column */
 .signalDropV4{border-color:#17425e!important;background:linear-gradient(180deg,#071b2b,#040d15)!important;border-radius:12px!important;box-shadow:var(--of-shadow)!important;margin-bottom:10px!important}.signalDropV4 .signalDropHead{padding:15px!important;background:linear-gradient(180deg,#0b2942,#071a29)!important;border-bottom:1px solid #153a52!important}.signalDropV4 .signalDropTitle{font-size:13px!important;letter-spacing:.09em!important}.signalDropV4 .signalDropCount{color:var(--of-green)!important}.signalDropV4 .sdLive{padding:9px 14px!important;background:#06131f!important}.signalDropV4 .sdNext{background:linear-gradient(180deg,#0b253c,#061421)!important;border-color:#1b4967!important}.signalDropV4 .sdNextSide.buy,.signalDropV4 .sdDir.buy{color:var(--of-green)!important}.signalDropV4 .sdNextSide.sell,.signalDropV4 .sdDir.sell{color:var(--of-red)!important}.signalDropV4 .sdNextSide.wait,.signalDropV4 .sdDir.wait{color:var(--of-gold)!important}
 .side>.sec{background:linear-gradient(180deg,#071522,#050e16)!important;border-color:#15354b!important;box-shadow:0 12px 28px rgba(0,0,0,.24)!important}.side>.sec h3{color:#9cb0c2!important}.side input,.side select{background:#06111b!important;border-color:#17364e!important}.calcCard{background:#06111b!important;border-color:#17384f!important}.calcTitle{color:var(--of-gold)!important}.meter{background:#0b1a28!important}.meter>i{background:var(--of-gold)!important}
@@ -457,16 +470,16 @@ body[data-view="dashboard"] .workspace .tabs{position:sticky;top:0;z-index:8;box
     <div id="orderResult" class="orderResult" style="display:none"></div><div class="g2" style="margin-top:8px"><button class="btn danger" id="closePosition" style="font-weight:900;padding:11px">✕ TUTUP POSISI</button><button class="btn long" id="quickLong" style="font-weight:900;padding:11px">▲ BELI / LONG</button><button class="btn short" id="quickShort" style="font-weight:900;padding:11px">▼ JUAL / SHORT</button></div>
     <div id="autoTradePanel" style="margin-top:10px;border:1px solid rgba(0,220,160,.35);border-radius:10px;padding:10px;background:rgba(0,220,160,.055)">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
-        <div><b style="font-size:14px">🤖 AUTO TRADE</b><div class="note" style="margin-top:3px">Buka · tutup · reverse otomatis berdasarkan sinyal kuat.</div></div>
-        <button class="btn" id="autoTradeBtn" type="button" style="font-weight:900;min-width:105px">AUTO: OFF</button>
+        <div><b style="font-size:14px">⚡ OBSIDIAN AUTO ENGINE</b><div class="note" style="margin-top:3px">Scan peluang → entry BUY/SELL → kelola posisi → scan ulang.</div></div>
+        <button class="btn" id="autoTradeBtn" type="button" style="font-weight:900;min-width:105px">ENGINE: OFF</button>
       </div>
-      <div id="autoTradeStatus" class="note" style="margin-top:7px">AUTO TRADE MATI · order hanya manual</div>
+      <div id="autoTradeStatus" class="note" style="margin-top:7px">AUTO ENGINE OFF · entry otomatis tidak berjalan</div>
       <div class="g2" style="margin-top:7px">
         <label class="field"><small>Aktifkan profit lock mulai</small><input id="autoProfitArm" type="number" min="0" step="500" value="5000"></label>
         <label class="field"><small>Batas rugi otomatis</small><input id="autoLossCut" type="number" min="0" step="100" value="700"></label>
         <label class="field"><small>Profit yang boleh ditarik dari puncak (%)</small><input id="autoProfitGiveback" type="number" min="5" max="90" step="5" value="25"></label>
       </div>
-      <div class="note" style="margin-top:4px">AUTO sederhana: satu sinyal candle yang cukup kuat dapat membuka posisi. Profit dibiarkan berjalan dan tidak dipotong hanya karena retrace kecil. Default profit-lock memberi ruang retrace 25% dari puncak. Jika rugi mencapai batas otomatis, posisi ditutup. Tidak ada jaminan profit.<br><br>AUTO PROTECT: tidak ada batas maksimum profit. Setelah ambang tercapai, sistem melacak profit puncak Binance. Jika profit turun 25% dari puncak (atau sesuai pengaturan), posisi langsung ditutup. Setelah flat, AUTO akan ambil posisi kembali jika FINAL SIGNAL masih kuat, baik arah sama maupun berbalik. Tidak menjamin profit.</div>
+      <div class="note" style="margin-top:4px">AUTO ENGINE: kandidat scanner dapat membuka posisi BUY/SELL setelah pemeriksaan order dan risiko. Profit dibiarkan berjalan dan tidak dipotong hanya karena retrace kecil. Default profit-lock memberi ruang retrace 25% dari puncak. Jika rugi mencapai batas otomatis, posisi ditutup. Tidak ada jaminan profit.<br><br>AUTO PROTECT: tidak ada batas maksimum profit. Setelah ambang tercapai, sistem melacak profit puncak Binance. Jika profit turun 25% dari puncak (atau sesuai pengaturan), posisi langsung ditutup. Setelah flat, AUTO akan ambil posisi kembali jika FINAL SIGNAL masih kuat, baik arah sama maupun berbalik. Tidak menjamin profit.</div>
     </div>
   </div>
 </div>
@@ -932,7 +945,7 @@ body{min-width:0}
       ['adaptiveLearningV612','🧠 ADAPTIVE LEARNING','paper learning + statistics'],
       ['smartEntryV613','🎯 SMART ENTRY','timing + correlation guard'],
       ['positionManagerV614','🛡️ POSITION MANAGER','break-even + trailing + exit'],
-      ['paperEngineV615','🤖 PAPER AUTO ENGINE','simulation only']
+      ['paperEngineV615','⚡ AUTO ENGINE · PAPER MODE','simulation only']
     ];
 
     // Wait until all module containers have been rendered.
